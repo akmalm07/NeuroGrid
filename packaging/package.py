@@ -29,7 +29,7 @@ def make_release(platform: str, output: Path):
         with tarfile.open(archive, "w:gz") as handle:
             for name, source in files.items():
                 info = handle.gettarinfo(source, arcname=name)
-                info.mode = 0o755 if name in {"start-neurogrid", "install-neurogrid.sh"} else 0o644
+                info.mode = 0o755 if name in {"start-neurogrid", "install-neurogrid.sh", "neurogrid-agent"} else 0o644
                 data = source.read_bytes().replace(b"\r\n", b"\n")
                 info.size = len(data)
                 from io import BytesIO

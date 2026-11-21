@@ -10,7 +10,7 @@ NeuroGrid runs a language model across three volunteer CPU processes. Ask a shor
 
 Open Chat, sign in through GitHub or Google, and choose a prompt. Your account starts with 100 simulated credits while funds are available in the treasury. Chat is available while the trusted verifier and all three partitions are online. Network shows live coverage. Ledger shows credit reservations, verified settlements and refunds.
 
-Use Downloads to pair a node. The Windows ZIP and Linux TAR bundle installers and launchers that set up Python 3.12 virtual environments with CPU PyTorch and PySide6. Installation and the first model load need internet access. [Installation instructions](packaging/INSTALL.md)
+Use Downloads to pair a node. The Windows and Linux installers register **NeuroGrid Node** in the user's application menu. Both archives also include a headless installer option and a foreground CLI with node and work status. Installation and the first model load need internet access. [Desktop and headless instructions](packaging/INSTALL.md)
 
 ## Develop and deploy
 
@@ -30,7 +30,7 @@ DeepSpace supplies OAuth, SQLite Durable Objects, the RecordRoom subscription an
 - `npm run validate` type-checks the app and runs the ledger tests. `npm run lint` checks the app. `npm run build` produces browser and Worker bundles.
 - `python -m unittest discover -s compute/tests -p 'test_*.py' -v` compares the three partitions with full Hugging Face inference and checks invalid activations. It downloads the pinned checkpoint unless `NEUROGRID_MODEL` points to a local copy.
 - `compute/tests/live_check.py` exercises the hosted protocol with two DeepSpace test accounts, a trusted verifier and separate worker processes. Use an idle demo instance and two funded test accounts. Supply `--url`, `--model` and `--accounts`, where the accounts file is an external JSON array with two email and password objects. Export the verifier credential in the process environment.
-- The release workflow extracts the archives, installs their dependencies, starts the PySide6 window with Qt's offscreen platform, downloads the pinned checkpoint, and evaluates a CPU shard.
+- The release workflow checks the CLI on a headless install, verifies application menu entries, starts the PySide6 window with Qt's offscreen platform, downloads the pinned checkpoint, and evaluates a CPU shard.
 
 ### MVP verification
 

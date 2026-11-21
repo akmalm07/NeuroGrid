@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import signal
 import time
 from pathlib import Path
 from threading import Event
@@ -64,7 +65,8 @@ def run_node(client, stop, threads=2, duty=100, model_path=None, report=print):
         raise ValueError("This application uses a different checkpoint revision")
     report(f"Loading partition {profile['shard'] + 1} on CPU")
     partition = Partition(model_path or checkpoint(), profile["shard"])
-    report(f"Online · hosting partition {profile['shard'] + 1}")
+    if not stop.is_set():
+        report(f"Online · {profile['id']} · hosting partition {profile['shard'] + 1}")
     while not stop.is_set():
         try:
             response = client.call("claim", {})
@@ -76,7 +78,7 @@ def run_node(client, stop, threads=2, duty=100, model_path=None, report=print):
                 compute_time = time.monotonic() - start
                 if not stop.is_set():
                     client.call("result", {"lease": work["lease"], **result})
-                report(f"Online · hosting partition {partition.index + 1}")
+                    report(f"Result submitted · hosting partition {partition.index + 1}")
                 stop.wait(compute_time * (100 / duty - 1))
             else:
                 stop.wait(0.3 if response.get("active") else 5)
@@ -125,22 +127,29 @@ def main() -> None:
     parser.add_argument("--url", required=True)
     parser.add_argument("--model", type=Path)
     parser.add_argument("--threads", type=int, choices=range(1, 9), default=2)
+    parser.add_argument("--duty", type=int, default=100, metavar="PERCENT",
+                        help="Approximate compute duty cycle for a volunteer node (1–100)")
     args = parser.parse_args()
+    if not 1 <= args.duty <= 100:
+        parser.error("--duty must be between 1 and 100")
     secret = os.environ.get("NEUROGRID_SECRET", "")
     if not secret:
         parser.error("Set NEUROGRID_SECRET in the environment of this process")
-    client = GridClient(args.url, secret, args.role)
+    stop = Event()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(signum, lambda *_: stop.set())
+
+    def report(message: str) -> None:
+        print(message, flush=True)
+
     try:
+        client = GridClient(args.url, secret, args.role)
         if args.role == "reference":
-            run_verifier(client, Event(), threads=args.threads, model_path=args.model)
+            run_verifier(client, stop, threads=args.threads, model_path=args.model, report=report)
         else:
-            run_node(client, Event(), threads=args.threads, model_path=args.model)
-    except KeyboardInterrupt:
-        if args.role == "node":
-            try:
-                client.call("pause", {})
-            except (GridError, OSError, URLError):
-                pass
+            run_node(client, stop, threads=args.threads, duty=args.duty, model_path=args.model, report=report)
+    except (GridError, OSError, ValueError) as exc:
+        parser.exit(1, f"NeuroGrid: {exc}\n")
 
 
 if __name__ == "__main__":
