@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=78"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neurogrid-node"
+version = "0.1.0"
+description = "Volunteer CPU inference node for NeuroGrid"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "torch==2.7.1",
+  "transformers==4.52.4",
+  "huggingface-hub==0.36.2",
+  "safetensors==0.5.3",
+  "numpy==2.5.5",
+]
+
+[project.optional-dependencies]
+desktop = ["PySide6==6.9.1", "keyring==25.6.0"]
+
+[project.scripts]
+neurogrid-node = "neurogrid_node.desktop:main"
+neurogrid-agent = "neurogrid_node.client:main"
+
+[tool.setuptools.packages.find]
+include = ["neurogrid_node*"]
