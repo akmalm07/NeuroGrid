@@ -11,3 +11,13 @@ src/router.ts
 src/modals.tsx
 .claude/launch.json
 .claude/worktrees
+
+.env
+.env.*
+.venv/
+__pycache__/
+.playwright/
+.impeccable/
+release-dist/
+*.spec
+test-results/
