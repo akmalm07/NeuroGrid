@@ -3,6 +3,7 @@ import type { Block, JobSummary, NetworkSnapshot } from './protocol'
 
 export interface Account {
   credits: number
+  creditPack?: { credits: number; cents: number; live: boolean }
   jobs: JobSummary[]
   nodes: { id: string; shard: number; paused: boolean; expires: number }[]
 }
@@ -20,6 +21,8 @@ export const messages: Record<string, string> = {
   partition_unavailable: 'A partition lost its worker. Your reserved credits were returned.',
   node_limit: 'You have reached the node limit. Revoke an unused key to make room.',
   rate_limit: 'Too many requests. Try again in a minute.',
+  credits_sold_out: 'This credit pack is sold out. You can still use your balance.',
+  checkout_pending: 'Could not open checkout. If you already paid, wait for your balance to update before trying again.',
 }
 
 export function explain(error: unknown) {
@@ -46,6 +49,7 @@ async function request<T>(path: string, data?: object): Promise<T> {
 
 export const readNetwork = () => request<NetworkSnapshot>('public/network')
 export const readAccount = () => request<Account>('user/account')
+export const checkoutCredits = () => request<{ url: string }>('user/checkout', {})
 export const enroll = (shard: string) => request<Enrollment>('user/enroll', shard === 'auto' ? {} : { shard: Number(shard) })
 export const revoke = (id: string) => request<{ ok: boolean }>('user/revoke', { id })
 export const submit = (prompt: string, maxTokens: number, key: string) =>

@@ -25,6 +25,23 @@ Use Node 22.15+ or 24, npm 11.6+, and Python 3.12. To deploy your own copy, regi
 
 DeepSpace supplies OAuth, SQLite Durable Objects, the RecordRoom subscription and hosting. The integration catalog was reviewed. The pinned CPU model and reference checks use no external inference provider. GitHub publishes installer archives with SHA-256 checksums.
 
+## Stripe Checkout
+
+Checkout is disabled until configured. Signed-in users can still get 100 starter credits while the treasury can fund grants. Paid packs are an optional way to buy access to inference. The DeepSpace Worker creates Checkout Sessions through Stripe and verifies payment events. The Durable Object reserves credits before each session and updates the balance and ledger atomically after payment confirmation.
+
+Configure all four values using the DeepSpace secrets store. Use an isolated DeepSpace app and Stripe sandbox to test before enabling real payments.
+
+| Setting | Value |
+| --- | --- |
+| `NEUROGRID_STRIPE_KEY` | Stripe secret or restricted key with permission to create Checkout Sessions |
+| `NEUROGRID_STRIPE_WEBHOOK` | Endpoint signing secret from Stripe |
+| `NEUROGRID_STRIPE_ORIGIN` | Your app's HTTPS origin without a trailing slash |
+| `NEUROGRID_STRIPE_PACK` | Pack size and USD cents separated by a colon, for example `500:500` |
+
+In Stripe, point an event destination to `/api/grid/stripe/webhook` on that origin. Subscribe to `checkout.session.completed`, `checkout.session.expired`, `checkout.session.async_payment_succeeded`, and `checkout.session.async_payment_failed`. Complete an end-to-end sandbox purchase, expire an unpaid session, and resend a paid event before going live. Resolve outstanding test reservations in the sandbox.
+
+Before accepting live payments, confirm the compute-credit offering and tax setup with your Stripe account, and establish a support process for payment refunds and disputes. They require operator reconciliation because credits may already have paid a worker. If a checkout request is interrupted, opening it again retries the same order within 23 hours. To resolve an older pending order, locate its reference in Stripe and resend the terminal event. Review orders with no corresponding session manually.
+
 ## Tests
 
 - `npm run validate` type-checks the app and runs the ledger tests. `npm run lint` checks the app. `npm run build` produces browser and Worker bundles.
@@ -41,4 +58,4 @@ DeepSpace supplies OAuth, SQLite Durable Objects, the RecordRoom subscription an
 - Five ledger tests covered settlement, refund, tampering, overdraft and duplicate settlement.
 - The Windows and Linux install, launch, and CPU shard tests passed for v0.1.2. [Release workflow results](https://github.com/akmalm07/NeuroGrid/actions/runs/44879807628)
 
-The app accepts one active inference at a time. Credits have no monetary value. Since volunteer workers receive model inputs and activations, use prompts you can share.
+The app accepts one active inference at a time. Compute credits are nonredeemable and spendable on NeuroGrid inference. Since volunteer workers receive model inputs and activations, use prompts you can share.

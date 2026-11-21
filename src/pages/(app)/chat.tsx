@@ -3,9 +3,9 @@ import { useAuth } from 'deepspace'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
-import { explain, messages, readAccount, submit, type Account } from '../../neurogrid/api'
+import { checkoutCredits, explain, messages, readAccount, submit, type Account } from '../../neurogrid/api'
 import { useGridRevision, useNetwork } from '../../neurogrid/live'
-import { MODEL, SHARDS, fee } from '../../neurogrid/protocol'
+import { GRANT, MODEL, SHARDS, fee } from '../../neurogrid/protocol'
 import { networkReady, PageHeading } from '../../neurogrid/ui'
 
 const suggestions = ['What is a neural network?', 'Why do bees matter?', 'Describe a solar eclipse.']
@@ -19,11 +19,14 @@ export default function Chat() {
   const [limit, setLimit] = useState(16)
   const [error, setError] = useState('')
   const [sending, setSending] = useState(false)
+  const [checkoutBusy, setCheckoutBusy] = useState(false)
+  const [checkoutError, setCheckoutError] = useState('')
   const requestKey = useRef('')
   const conversation = useRef<HTMLDivElement>(null)
   const data = account && account.owner === userId ? account.data : undefined
   const pending = data?.jobs.find((job) => job.status !== 'settled' && job.status !== 'refunded')
   const ready = networkReady(network)
+  const checkoutReturned = new URLSearchParams(window.location.search).get('checkout') === 'complete'
 
   useEffect(() => {
     if (!isSignedIn || !userId) return
@@ -72,6 +75,18 @@ export default function Chat() {
     } catch (reason) {
       setError(explain(reason))
     } finally { setSending(false) }
+  }
+
+  async function buyCredits() {
+    setCheckoutBusy(true)
+    setCheckoutError('')
+    try {
+      const { url } = await checkoutCredits()
+      window.location.assign(url)
+    } catch (reason) {
+      setCheckoutError(explain(reason))
+      setCheckoutBusy(false)
+    }
   }
 
   return <div className="grid-container page-body">
@@ -123,7 +138,16 @@ export default function Chat() {
           <Coins size={21} /><h2>Compute credits</h2>
           {isSignedIn ? <strong className="large-value">{data?.credits ?? '—'}</strong>
             : <button className="text-link" type="button" onClick={() => showSignIn(true)}>Sign in to view your balance</button>}
+          {!isSignedIn && <p>New accounts start with {GRANT} free credits while starter credits are available.</p>}
           <p>Up to {fee(limit)} credits reserved. Unused credits come back to your balance.</p>
+          {data?.creditPack && <>
+            <Button variant="outline" disabled={checkoutBusy} onClick={() => void buyCredits()}>
+              {checkoutBusy ? 'Opening checkout…' : `${data.creditPack.live ? 'Buy' : 'Test purchase of'} ${data.creditPack.credits.toLocaleString()} credits · ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(data.creditPack.cents / 100)}`}
+            </Button>
+            <p>Credits are for NeuroGrid inference.</p>
+            {checkoutReturned && <p role="status">Your balance updates after Stripe confirms payment.</p>}
+            {checkoutError && <p className="form-error" role="alert">{checkoutError}</p>}
+          </>}
         </section>
         <section className="surface side-panel">
           <h2>Inference pipeline</h2>

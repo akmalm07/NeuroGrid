@@ -7,12 +7,15 @@ export async function verifyChain(blocks: Block[]): Promise<{ height: number; he
   let previous = EMPTY_HASH
   const balances = new Map<string, number>()
   const reservations = new Map<string, { account: string; amount: number }>()
+  const checkouts = new Map<string, number>()
+  const paidReceipts = new Set<string>()
   const seen = new Set<string>()
   for (const [height, block] of blocks.entries()) {
     const invalid = () => new Error(`Invalid ledger at block ${height}`)
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(blockBytes(block)))
     const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
-    const kinds: BlockKind[] = ['genesis', 'grant', 'reserve', 'settle', 'refund']
+    const kinds: BlockKind[] = ['genesis', 'grant', 'reserve', 'settle', 'refund',
+      'checkout', 'purchase', 'checkout_release']
     const key = `${block.kind}/${block.reference}`
     if (block.version !== 1 || block.height !== height || block.previousHash !== previous
         || hash !== block.hash || !kinds.includes(block.kind) || seen.has(key)) throw invalid()
@@ -27,6 +30,23 @@ export async function verifyChain(blocks: Block[]): Promise<{ height: number; he
       throw invalid()
     }
     const escrow = `held:${block.reference}`
+    const checkout = `checkout:${block.reference}`
+    if (block.kind === 'checkout') {
+      const amount = transfers.get(checkout) ?? 0
+      if (amount <= 0 || transfers.size !== 2 || transfers.get(TREASURY) !== -amount) throw invalid()
+      checkouts.set(block.reference, amount)
+    }
+    if (block.kind === 'purchase' || block.kind === 'checkout_release') {
+      const amount = checkouts.get(block.reference)
+      const recipient = block.transfers.find(([name, delta]) => delta === amount &&
+        (block.kind === 'purchase' ? name.startsWith('acct:') : name === TREASURY))
+      if (!amount || !recipient || transfers.size !== 2 || transfers.get(checkout) !== -amount) throw invalid()
+      if (block.kind === 'purchase') {
+        if (!/^[\da-f]{64}$/.test(block.proof) || paidReceipts.has(block.proof)) throw invalid()
+        paidReceipts.add(block.proof)
+      }
+      checkouts.delete(block.reference)
+    }
     if (block.kind === 'grant') {
       const grant = transfers.get(block.reference) ?? 0
       if (grant <= 0 || transfers.get(TREASURY) !== -grant || transfers.size !== 2) throw invalid()

@@ -30,6 +30,8 @@ Genesis puts 100,000 credits in the treasury. An account can receive a 100-credi
 
 Each financial transition and corresponding block append happens in one synchronous SQLite transaction. User-scoped idempotency keys prevent repeated debits. Every block includes a canonical field sequence, the prior SHA-256 hash and pseudonymous transfer deltas. Settlement includes a digest of the verified steps. Replay checks the links and hashes, genesis supply, integer transfers, nonnegative balances and a single terminal event per reservation.
 
+When Stripe Checkout is configured, the DeepSpace coordinator places a pack of treasury credits in a separate checkout escrow before opening the hosted payment page. Stripe receives an idempotency key tied to the order. A signed paid event for the expected USD amount settles the order exactly once and appends a receipt digest. Confirmed expiration or payment failure releases the escrow. Credits are for NeuroGrid inference and all transitions preserve the original supply. The public ledger does not contain Stripe customer or card data.
+
 ## Trust and operation
 
 Reference recomputation confirms output agreement. It duplicates inference arithmetic and cannot prove which physical computer performed the work. A known chain head is required to detect tampering by a coordinator that can rewrite its history. SQLite and access controls suffice under a single trusted operator. Independent validators with shared authority could justify a replicated ledger in a future version.

@@ -7,7 +7,8 @@ import { useGridRevision, useNetwork } from '../../neurogrid/live'
 import { SUPPLY, type Block } from '../../neurogrid/protocol'
 import { PageHeading } from '../../neurogrid/ui'
 
-const eventName = { genesis: 'Genesis', grant: 'Account grant', reserve: 'Inference reservation', settle: 'Verified settlement', refund: 'Refund' }
+const eventName = { genesis: 'Genesis', grant: 'Account grant', reserve: 'Inference reservation', settle: 'Verified settlement',
+  refund: 'Refund', checkout: 'Checkout reservation', purchase: 'Credit purchase', checkout_release: 'Checkout released' }
 
 export default function Ledger() {
   const { result } = useNetwork(useGridRevision())

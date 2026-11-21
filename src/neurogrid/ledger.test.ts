@@ -6,7 +6,8 @@ import { blockBytes, type Block, type BlockData } from './protocol'
 function seal(previous: Block | undefined, kind: Block['kind'], reference: string, transfers: Block['transfers']): Block {
   const block: BlockData = {
     version: 1, height: previous ? previous.height + 1 : 0, previousHash: previous?.hash ?? EMPTY_HASH,
-    createdAt: 1_000, kind, reference, transfers, proof: kind === 'settle' ? 'a'.repeat(64) : '',
+    createdAt: 1_000, kind, reference, transfers,
+    proof: kind === 'settle' || kind === 'purchase' ? 'a'.repeat(64) : '',
   }
   return { ...block, hash: createHash('sha256').update(blockBytes(block)).digest('hex') }
 }
@@ -41,5 +42,21 @@ describe('ledger replay', () => {
   it('rejects a correctly hashed overspend', async () => {
     const overspend = seal(grant, 'reserve', 'job-id', [['acct:requester', -103], ['held:job-id', 103]])
     await expect(verifyChain([genesis, grant, overspend])).rejects.toThrow('block 2')
+  })
+
+  it('moves reserved checkout credits to the buyer once, preserving supply', async () => {
+    const checkout = seal(grant, 'checkout', 'order', [['treasury', -500], ['checkout:order', 500]])
+    const purchase = seal(checkout, 'purchase', 'order', [['checkout:order', -500], ['acct:buyer', 500]])
+    const duplicate = seal(purchase, 'purchase', 'order', purchase.transfers)
+    await expect(verifyChain([genesis, grant, checkout, purchase])).resolves.toMatchObject({ height: 3 })
+    await expect(verifyChain([genesis, grant, checkout, purchase, duplicate])).rejects.toThrow('block 4')
+  })
+
+  it('rejects fulfillment after an expired checkout released the credits', async () => {
+    const checkout = seal(grant, 'checkout', 'order', [['treasury', -500], ['checkout:order', 500]])
+    const released = seal(checkout, 'checkout_release', 'order', [['checkout:order', -500], ['treasury', 500]])
+    const purchase = seal(released, 'purchase', 'order', [['checkout:order', -500], ['acct:buyer', 500]])
+    await expect(verifyChain([genesis, grant, checkout, released])).resolves.toMatchObject({ height: 3 })
+    await expect(verifyChain([genesis, grant, checkout, released, purchase])).rejects.toThrow('block 4')
   })
 })

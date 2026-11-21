@@ -15,6 +15,7 @@ export const SHARDS = [
 
 export type Transfer = [account: string, delta: number]
 export type BlockKind = 'genesis' | 'grant' | 'reserve' | 'settle' | 'refund'
+  | 'checkout' | 'purchase' | 'checkout_release'
 export interface BlockData {
   version: 1
   height: number
