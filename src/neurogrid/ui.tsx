@@ -31,7 +31,7 @@ export function Shell({ children, auth }: { children: ReactNode; auth?: { signed
       <footer className="grid-footer">
         <div className="grid-container footer-content">
           <Link to="/" className="wordmark"><Hexagon size={18} /> Neuro<span>Grid</span></Link>
-          <p>Open-source distributed inference. Simulated credits.</p>
+          <p>Distributed inference. Simulated credits.</p>
           <a href="https://github.com/akmalm07/NeuroGrid">Source code <ArrowRight size={15} /></a>
         </div>
       </footer>

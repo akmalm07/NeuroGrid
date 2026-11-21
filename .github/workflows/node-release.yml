@@ -32,6 +32,7 @@ jobs:
           ./node-install/Install-NeuroGrid.ps1
           $env:QT_QPA_PLATFORM = 'offscreen'
           ./node-install/.venv/Scripts/python.exe -m neurogrid_node.desktop --smoke-test
+          ./node-install/.venv/Scripts/python.exe -c "from neurogrid_node.model import Partition, checkpoint, configure_cpu; configure_cpu(2); assert Partition(checkpoint(), 0).run({'tokens': [1]}, 1)['tensor']"
       - if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
@@ -40,6 +41,7 @@ jobs:
           tar -xf release-dist/NeuroGrid-Node-Linux-x64.tar.gz -C node-install
           NEUROGRID_PYTHON="$(command -v python)" ./node-install/install-neurogrid.sh
           QT_QPA_PLATFORM=offscreen ./node-install/start-neurogrid --smoke-test
+          ./node-install/.venv/bin/python -c "from neurogrid_node.model import Partition, checkpoint, configure_cpu; configure_cpu(2); assert Partition(checkpoint(), 0).run({'tokens': [1]}, 1)['tensor']"
       - uses: actions/upload-artifact@v4
         with:
           name: neurogrid-${{ matrix.platform }}

@@ -1,6 +1,7 @@
 """CPU-only partitions for one immutable SmolLM2 checkpoint."""
 
 import base64
+import os
 from pathlib import Path
 
 import numpy as np
@@ -19,16 +20,27 @@ REVISION = "12fd25f77366fa6b3b4b768ec3050bf629380bac"
 WIDTH = 576
 CONTEXT = 128
 VOCAB = 49152
+MODEL_FILES = (
+    "config.json", "generation_config.json", "tokenizer.json", "tokenizer_config.json",
+    "special_tokens_map.json", "model.safetensors",
+)
 
 
 def checkpoint() -> Path:
+    # On Windows the default hub cache may require symlink privileges when
+    # multiple downloads probe it concurrently. A local snapshot uses files.
+    local_dir = None
+    if os.name == "nt":
+        user_data = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+        local_dir = user_data / "NeuroGrid" / "models" / REVISION
+        if all((local_dir / name).is_file() for name in MODEL_FILES):
+            return local_dir
     return Path(snapshot_download(
         MODEL,
         revision=REVISION,
-        allow_patterns=[
-            "config.json", "generation_config.json", "tokenizer*.json",
-            "special_tokens_map.json", "model.safetensors",
-        ],
+        allow_patterns=list(MODEL_FILES),
+        local_dir=local_dir,
+        token=False,
     ))
 
 
