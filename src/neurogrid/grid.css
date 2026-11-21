@@ -13,7 +13,6 @@
   flex-direction: column;
   background: var(--midnight);
   color: var(--ink);
-  font-family: Inter, "Segoe UI", system-ui, sans-serif;
 }
 .grid-site main { flex: 1; }
 .grid-container { width: min(1200px, calc(100% - 96px)); margin-inline: auto; }
