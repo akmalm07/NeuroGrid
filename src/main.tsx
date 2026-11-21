@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { Routes } from '@generouted/react-router'
 import './styles.css'
+import './neurogrid/grid.css'
 
 /**
  * Recover a tab that outlived a deploy: its index.html names chunks the deploy

@@ -1,39 +1,56 @@
-/**
- * Landing page — a STATIC page.
- *
- * It lives at the top level of src/pages/ (not under (app)/), so it renders
- * with no DeepSpace providers: no auth session fetch, no records WebSocket.
- * That makes it cheap to serve and safe for logged-out / crawler traffic.
- *
- * Need live data or auth here? Move this file to src/pages/(app)/index.tsx
- * and it becomes a dynamic page. Conversely, any page you want to keep static
- * (marketing, docs, legal) belongs at this top level.
- */
-
+import { Activity, ArrowRight, BadgeCheck, CircuitBoard, Coins, Cpu, Layers3 } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { APP_NAME } from '../constants'
+import { useNetwork } from '../neurogrid/live'
+import { MODEL } from '../neurogrid/protocol'
+import { Coverage, networkReady, Shell, StartLinks } from '../neurogrid/ui'
 
-export default function Landing() {
-  return (
-    <div
-      data-testid="static-landing"
-      className="flex min-h-screen flex-col items-center justify-center px-6 text-center"
-    >
-      <p className="mb-3 text-sm uppercase tracking-widest text-muted-foreground">{APP_NAME}</p>
-      <h1 className="mb-4 max-w-2xl text-4xl font-bold tracking-tight text-foreground sm:text-5xl">
-        A DeepSpace app with a static front door
-      </h1>
-      <p className="mb-8 max-w-md text-muted-foreground">
-        This landing page ships no auth call and no realtime connection — it's a
-        plain static page. The live app, with sign-in and synced data, lives
-        behind the link below.
-      </p>
-      <Link
-        to="/home"
-        className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-      >
-        Enter the app
-      </Link>
-    </div>
-  )
+const process = [
+  { icon: CircuitBoard, title: 'Run one partition', text: 'The desktop app loads ten transformer layers and uses the CPU budget you set.' },
+  { icon: Layers3, title: 'Generate together', text: 'Each shard passes its output to the next. The coordinator repeats the sequence for every new token.' },
+  { icon: BadgeCheck, title: 'Get credit for work', text: 'A trusted reference checks every result. Successful requests pay contributors from the inference fee.' },
+]
+
+export default function Home() {
+  const { result, failed } = useNetwork()
+  const online = result?.nodes.filter(({ status }) => status === 'online' || status === 'working').length
+  return <Shell>
+    <section className="grid-hero" data-testid="static-landing">
+      <div className="hero-art" aria-hidden="true" />
+      <div className="grid-container hero-inner">
+        <Link to="/network" className="hero-status">
+          <span className={'live-dot ' + (networkReady(result) ? 'available' : '')} />
+          {failed ? 'Status unavailable' : !result ? 'Checking network' : networkReady(result) ? 'Network ready' : 'Waiting for capacity'}
+          <ArrowRight size={14} />
+        </Link>
+        <h1>One model.<br /><em>Many machines.</em></h1>
+        <p>NeuroGrid splits a language model across volunteer computers. Try the chat or host a piece of the model and earn compute credits for verified work.</p>
+        <StartLinks />
+      </div>
+    </section>
+    <section className="home-metrics" aria-label="Network and model at a glance">
+      <div className="grid-container metrics">
+        <div><Cpu size={20} /><div><strong>{online ?? '—'}</strong><span>Nodes online</span></div></div>
+        <div><Layers3 size={20} /><div><strong>30</strong><span>Transformer layers</span></div></div>
+        <div><Activity size={20} /><div><strong>{result?.settled ?? '—'}</strong><span>Verified requests</span></div></div>
+        <div><Coins size={20} /><div><strong>100,000</strong><span>Simulated credit supply</span></div></div>
+      </div>
+    </section>
+    <section className="grid-container home-section">
+      <div className="section-heading">
+        <div><h2>Follow the signal</h2><p>Three partitions run {MODEL}, ten layers at a time.</p></div>
+        <Link className="text-link" to="/network">View the network <ArrowRight size={17} /></Link>
+      </div>
+      <Coverage network={result} />
+    </section>
+    <section className="workflow">
+      <div className="grid-container home-section">
+        <div className="section-heading"><div><h2>How it works</h2><p>From your computer to a verified response.</p></div></div>
+        <div className="workflow-grid">{process.map(({ icon: Icon, title, text }) => <article key={title}>
+          <Icon size={24} /><h3>{title}</h3><p>{text}</p>
+        </article>)}</div>
+        <p className="workflow-note">The coordinator verifies outputs and records settlements in a SHA-256 ledger. Credits are for the demo and have no monetary value. <Link to="/ledger">Explore the ledger <ArrowRight size={16} /></Link></p>
+      </div>
+    </section>
+  </Shell>
 }
+
