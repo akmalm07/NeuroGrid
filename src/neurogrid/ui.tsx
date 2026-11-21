@@ -74,7 +74,7 @@ export function StartLinks() {
   return (
     <div className="hero-actions">
       <Link className="grid-button hero-button filled" to="/downloads"><ArrowDownToLine size={19} />Start Computing</Link>
-      <Link className="grid-button hero-button outlined" to="/chat"><Cable size={19} />Try NeuroGrid</Link>
+      <Link className="grid-button hero-button filled" to="/chat"><Cable size={19} />Try NeuroGrid</Link>
     </div>
   )
 }

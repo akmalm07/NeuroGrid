@@ -25,21 +25,25 @@ test('ledger verifies in a fresh browser', async ({ page }) => {
   await page.goto('/ledger')
   await page.getByRole('button', { name: 'Verify ledger' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'blocks from genesis' })).toBeVisible()
-  await page.getByText('Genesis', { exact: true }).click()
-  await expect(page.getByText('Previous hash', { exact: true })).toBeVisible()
+  const genesis = page.locator('details').filter({ hasText: 'Genesis' })
+  await genesis.getByText('Genesis', { exact: true }).click()
+  await expect(genesis.getByText('Previous hash', { exact: true })).toBeVisible()
 })
 
 test('a signed-in browser runs a live prompt and preserves the reply after reload', async ({ page }) => {
   const path = process.env.NEUROGRID_TEST_ACCOUNTS
   test.skip(!path, 'Needs a funded DeepSpace test account and active model workers')
+  test.setTimeout(90_000)
   const [account] = JSON.parse(readFileSync(path!, 'utf8').replace(/^\uFEFF/, ''))
   await page.goto('/chat')
-  const response = await page.request.post('/api/auth/sign-in/email', { data: account })
+  const response = await page.request.post('/api/auth/sign-in/email', {
+    data: account, headers: { Origin: new URL(page.url()).origin },
+  })
   expect(response.status()).toBe(200)
   await page.reload()
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible()
   await page.getByLabel('Maximum tokens').selectOption('4')
-  const prompt = 'Reply with one word: blue.'
+  const prompt = 'Reply with one word: blue. Reference ' + Date.now()
   await page.getByRole('textbox', { name: 'Message' }).fill(prompt)
   await page.getByRole('button', { name: 'Send prompt' }).click()
   await expect(page.locator('.chat-turn').filter({ hasText: prompt }).last()).toContainText('tokens ·', { timeout: 60_000 })

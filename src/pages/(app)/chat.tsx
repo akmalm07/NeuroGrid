@@ -121,7 +121,8 @@ export default function Chat() {
       <aside className="chat-sidebar">
         <section className="surface side-panel">
           <Coins size={21} /><h2>Compute credits</h2>
-          <strong className="large-value">{data?.credits ?? '—'}</strong>
+          {isSignedIn ? <strong className="large-value">{data?.credits ?? '—'}</strong>
+            : <button className="text-link" type="button" onClick={() => showSignIn(true)}>Sign in to view your balance</button>}
           <p>Up to {fee(limit)} credits reserved. Unused credits come back to your balance.</p>
         </section>
         <section className="surface side-panel">

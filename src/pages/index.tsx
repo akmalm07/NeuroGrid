@@ -17,11 +17,6 @@ export default function Home() {
     <section className="grid-hero" data-testid="static-landing">
       <div className="hero-art" aria-hidden="true" />
       <div className="grid-container hero-inner">
-        <Link to="/network" className="hero-status">
-          <span className={'live-dot ' + (networkReady(result) ? 'available' : '')} />
-          {failed ? 'Status unavailable' : !result ? 'Checking network' : networkReady(result) ? 'Network ready' : 'Waiting for capacity'}
-          <ArrowRight size={14} />
-        </Link>
         <h1>One model.<br /><em>Many machines.</em></h1>
         <p>NeuroGrid splits a language model across volunteer computers. Try the chat or host a piece of the model and earn compute credits for verified work.</p>
         <StartLinks />
@@ -29,7 +24,12 @@ export default function Home() {
     </section>
     <section className="home-metrics" aria-label="Network and model at a glance">
       <div className="grid-container metrics">
-        <div><Cpu size={20} /><div><strong>{online ?? '—'}</strong><span>Nodes online</span></div></div>
+        <div><Cpu size={20} /><div><strong>{online ?? '—'}</strong><span>Nodes online</span>
+          <Link to="/network" className="metric-status">
+            <span className={'live-dot ' + (networkReady(result) ? 'available' : '')} />
+            {failed ? 'Status unavailable' : !result ? 'Checking network' : networkReady(result) ? 'Network ready' : 'Waiting for capacity'}
+          </Link>
+        </div></div>
         <div><Layers3 size={20} /><div><strong>30</strong><span>Transformer layers</span></div></div>
         <div><Activity size={20} /><div><strong>{result?.settled ?? '—'}</strong><span>Verified requests</span></div></div>
         <div><Coins size={20} /><div><strong>100,000</strong><span>Simulated credit supply</span></div></div>

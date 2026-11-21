@@ -39,16 +39,13 @@
 .grid-hero { position: relative; overflow: hidden; min-height: 556px; isolation: isolate; background: #080b14; }
 .hero-art { position: absolute; z-index: -1; inset: 0 0 0 35%; background: url('/neurogrid-hero.webp') center / cover no-repeat; }
 .hero-art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, #080b14 0%, #080b14eb 7%, #080b1466 27%, transparent 53%), linear-gradient(0deg, #080b14a6 0%, transparent 23%); }
-.hero-inner { padding-block: 76px 88px; }
-.hero-status { display: inline-flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid #303956; border-radius: 6px; background: #111627; color: #c3cbe2; font-size: 12px; font-weight: 600; }
-.hero-status:hover { color: #fff; border-color: var(--violet); }
-.hero-status svg { margin-left: 5px; }
+.hero-inner { padding-block: 99px 88px; }
 .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #8993aa; flex: 0 0 auto; }
 .live-dot.available { background: var(--green); box-shadow: 0 0 10px #64e8b45c; }
-.hero-inner h1 { margin: 23px 0 17px; max-width: 730px; font-weight: 690; font-size: clamp(51px, 7vw, 103px); line-height: .99; letter-spacing: -.075em; }
+.hero-inner h1 { margin: 0 0 17px; max-width: 730px; font-weight: 690; font-size: clamp(51px, 7vw, 103px); line-height: .99; letter-spacing: -.075em; }
 .hero-inner h1 em { color: #aaa5ff; font-style: normal; }
 .hero-inner > p { font-size: clamp(16px, 1.5vw, 19px); color: #bac4da; line-height: 1.65; max-width: 490px; }
-.hero-actions { display: flex; flex-wrap: wrap; gap: 13px; margin-top: 28px; }
+.hero-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; margin-top: 28px; width: min(100%, 382px); }
 .hero-button { min-height: 50px; padding-inline: 21px; }
 .home-metrics { background: #0d111d; border-block: 1px solid var(--rule); }
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); }
@@ -58,6 +55,9 @@
 .metrics strong, .metrics span { display: block; }
 .metrics strong { font-size: 23px; letter-spacing: -.04em; line-height: 1.25; font-variant-numeric: tabular-nums; }
 .metrics span { color: var(--secondary); font-size: 13px; margin-top: 4px; }
+.metric-status { display: inline-flex; align-items: center; gap: 6px; color: #c3cbe2; font-size: 12px; font-weight: 600; margin-top: 8px; }
+.metric-status:hover { color: var(--ink); text-decoration: underline; }
+.metric-status .live-dot { width: 6px; height: 6px; margin: 0; }
 .home-section { padding-block: 60px; }
 .section-heading { display: flex; justify-content: space-between; align-items: end; gap: 17px; margin-bottom: 22px; }
 .section-heading h2, .registry h2, .download-card h2 { color: var(--ink); font-size: clamp(23px, 3vw, 35px); letter-spacing: -.05em; font-weight: 670; line-height: 1.2; }
@@ -188,7 +188,12 @@
   .metrics span { font-size: 12px; }
   .home-section { padding-block: 40px; }
   .section-heading { align-items: start; flex-direction: column; }
-  .partition-grid, .workflow-grid, .network-metrics, .download-grid, .chat-grid { grid-template-columns: 1fr; }
+  .partition-grid, .workflow-grid, .download-grid, .chat-grid { grid-template-columns: 1fr; }
+  .network-metrics { gap: 6px; }
+  .network-metrics .side-panel { padding: 10px; }
+  .network-metrics .side-panel h2, .network-metrics .side-panel strong { font-size: 12px; }
+  .network-metrics .side-panel .large-value { font-size: 21px; }
+  .network-metrics .side-panel p { font-size: 11px; }
   .partition-card { min-height: auto; padding: 16px; }
   .partition-top { margin-bottom: 10px; }
   .footer-content { align-items: start; flex-direction: column; gap: 10px; }

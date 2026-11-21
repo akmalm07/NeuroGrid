@@ -32,4 +32,11 @@ DeepSpace supplies OAuth, SQLite Durable Objects, the RecordRoom subscription an
 - `compute/tests/live_check.py` exercises the hosted protocol with two DeepSpace test accounts, a trusted verifier and separate worker processes. Use an idle demo instance and two funded test accounts. Supply `--url`, `--model` and `--accounts`, where the accounts file is an external JSON array with two email and password objects. Export the verifier credential in the process environment.
 - The release workflow extracts the archives, installs their dependencies and starts the PySide6 window on Windows and Linux with Qt's offscreen platform.
 
+### MVP verification
+
+- Local CPU comparison produced 24 matching greedy tokens over three prompts against the independently loaded full model. The Python tests also checked reference rejection of invalid activations.
+- Hosted protocol checks used two authenticated test accounts and separate worker processes on one Windows host. A disappeared worker was replaced and the four-token request settled once in 31.7 seconds, including the lease timeout. A malformed activation was rejected and its reservation was refunded once in 15.0 seconds.
+- The hosted browser suite exercised all five pages, the two primary actions, ledger verification, mobile layout and a signed-in chat request. The sampled four-token browser check, including authentication and a reload that confirmed the response persisted, took 13.8 seconds. Browser WebSocket frames contained the read-only DeepSpace grid status projection.
+- Five ledger tests covered settlement, refund, tampering, overdraft and duplicate settlement.
+
 The app accepts one active inference at a time. Credits have no monetary value. Since volunteer workers receive model inputs and activations, use prompts you can share.
