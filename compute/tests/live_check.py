@@ -16,7 +16,7 @@ from neurogrid_node.client import GridClient, GridError
 
 def call(base, path, *, data=None, token=None, cookie=None):
     body = None if data is None else json.dumps(data).encode()
-    headers = {"Origin": base, "Content-Type": "application/json"}
+    headers = {"Origin": base, "Content-Type": "application/json", "User-Agent": "NeuroGrid-Live-Check/0.1"}
     if token:
         headers["Authorization"] = "Bearer " + token
     if cookie:
@@ -26,7 +26,11 @@ def call(base, path, *, data=None, token=None, cookie=None):
         with urlopen(request, timeout=12) as response:
             return response.status, json.load(response), response.headers
     except HTTPError as error:
-        return error.code, json.loads(error.read()), error.headers
+        try:
+            data = json.loads(error.read())
+        except ValueError:
+            data = {"error": "upstream_response"}
+        return error.code, data, error.headers
 
 
 def auth(base, account):
@@ -118,6 +122,10 @@ def main():
         # The first participant claims work and disappears without pausing.
         failover_start = time.monotonic()
         job_id, request = start()
+        duplicate_status, duplicate_job, _ = call(origin, "/api/grid/user/request", data=request, token=requester)
+        assert duplicate_status == 200 and duplicate_job["id"] == job_id
+        competing = {**request, "key": str(uuid.uuid4())}
+        assert call(origin, "/api/grid/user/request", data=competing, token=requester)[1]["error"] == "network_busy"
         work = wait_until(lambda: dormant.call("claim", {}).get("work"), "first-stage lease")
         backup = enroll(0)
         node_a = run_agent("node", backup["secret"])

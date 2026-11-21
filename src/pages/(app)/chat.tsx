@@ -75,7 +75,7 @@ export default function Chat() {
   }
 
   return <div className="grid-container page-body">
-    <PageHeading title="Chat">Ask a short question. Three CPU partitions generate the answer one token at a time.</PageHeading>
+    <PageHeading title="Chat">Ask a short question. Three CPU partitions generate the answer one token at a time. Keep sensitive information out of prompts.</PageHeading>
     <div className="chat-grid">
       <section className="surface chat-panel" aria-label="Conversation">
         <div className="chat-title"><Bot size={21} /><strong>{MODEL}</strong><span className={'live-dot ' + (ready ? 'available' : '')} /></div>

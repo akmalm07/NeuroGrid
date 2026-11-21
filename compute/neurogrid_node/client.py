@@ -12,6 +12,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .model import REVISION, Partition, Verifier, checkpoint, configure_cpu
 
+USER_AGENT = "NeuroGrid-Node/0.1"
+
 
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -42,6 +44,7 @@ class GridClient:
         body = json.dumps({"revision": REVISION, **data}).encode() if data is not None else None
         req = Request(f"{self.base}/{action}", data=body, headers={
             "Content-Type": "application/json", "Authorization": f"Bearer {self.secret}",
+            "User-Agent": USER_AGENT,
         })
         try:
             with self.opener.open(req, timeout=15) as response:

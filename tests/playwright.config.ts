@@ -11,19 +11,20 @@ import { defineConfig } from '@playwright/test'
  *   DEEPSPACE_PORT=5180 npx deepspace test run   (terminal 3, against A)
  */
 const PORT = Number(process.env.DEEPSPACE_PORT ?? 5173)
-const BASE_URL = `http://localhost:${PORT}`
+const hosted = process.env.NEUROGRID_TEST_URL
+const BASE_URL = hosted || `http://localhost:${PORT}`
 
 export default defineConfig({
   testDir: '.',
   testMatch: '**/*.spec.ts',
-  globalSetup: './helpers/global-setup.ts',
+  globalSetup: hosted ? undefined : './helpers/global-setup.ts',
   timeout: 30_000,
   retries: 0,
   use: {
     baseURL: BASE_URL,
     headless: true,
   },
-  webServer: {
+  webServer: hosted ? undefined : {
     command: `npx vite --port ${PORT} --strictPort --host`,
     cwd: '..',
     url: BASE_URL,
