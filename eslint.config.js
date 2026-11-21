@@ -21,7 +21,7 @@ export default [
   // silent unless there's a real Rules of Hooks violation.
   // `**/._*` covers macOS AppleDouble metadata files, which are binary and
   // otherwise hard-fail the lint with "Parsing error: Invalid character".
-  { ignores: ['dist/**', 'node_modules/**', '.wrangler/**', '.vite/**', 'src/router.ts', '**/._*'] },
+  { ignores: ['dist/**', 'node_modules/**', '.venv/**', '.wrangler/**', '.vite/**', 'src/router.ts', '**/._*'] },
   {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {

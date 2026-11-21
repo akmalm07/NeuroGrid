@@ -9,7 +9,6 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { CanvasRoom, CronRoom, JobRoom, PresenceRoom, RecordRoom, YjsRoom } from 'deepspace/worker'
 import type { DOBindings, DOManifest, Job, JobContext } from 'deepspace/worker'
-import { registerAiChatRoutes } from './src/ai/chat-routes.js'
 import { tasks as cronTasks, runTask as runCronTask } from './src/cron.js'
 import { runJob } from './src/jobs.js'
 import { schemas } from './src/schemas.js'
@@ -21,6 +20,8 @@ import {
   resolveAuth,
 } from './src/server/http-routes.js'
 import { registerRealtimeRoutes } from './src/server/realtime-routes.js'
+import { registerNeuroGrid } from './src/neurogrid/routes'
+export { NeuroGridCoordinator } from './src/neurogrid/coordinator'
 
 // Dynamic deploy reads this manifest to create the app's DO bindings.
 export const __DO_MANIFEST__ = [
@@ -30,6 +31,7 @@ export const __DO_MANIFEST__ = [
   { binding: 'PRESENCE_ROOMS', className: 'AppPresenceRoom', sqlite: true },
   { binding: 'CRON_ROOMS', className: 'AppCronRoom', sqlite: true },
   { binding: 'JOB_ROOMS', className: 'AppJobRoom', sqlite: true },
+  { binding: 'NEUROGRID', className: 'NeuroGridCoordinator', sqlite: true },
 ] as const satisfies DOManifest
 
 export class AppRecordRoom extends RecordRoom<Env> {
@@ -98,6 +100,7 @@ export interface Env extends DOBindings<typeof __DO_MANIFEST__> {
    * deepspace dev/test set it locally; deployed environments must opt in.
    */
   ALLOW_DEBUG_ROUTES?: string
+  NEUROGRID_VERIFIER_SECRET?: string
 }
 
 export type AppContext = { Bindings: Env }
@@ -110,7 +113,7 @@ app.use('/api/*', cors())
 registerAuthAndIntegrationRoutes(app)
 registerRealtimeRoutes(app)
 registerActionRoutes(app, resolveAuth)
-registerAiChatRoutes(app, resolveAuth)
+registerNeuroGrid(app)
 registerPlatformProxyRoutes(app)
 registerStaticRoutes(app)
 

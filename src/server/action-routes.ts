@@ -17,7 +17,7 @@ export function registerActionRoutes(app: Hono<AppContext>, resolveAuth: Resolve
     const auth = await resolveAuth(c.req.raw, c.env)
     if (!auth) return c.json({ error: 'Unauthorized' }, 401)
     const name = c.req.param('name')
-    const action = actions[name]
+    const action = Object.hasOwn(actions, name) ? actions[name] : undefined
     if (!action) return c.json({ error: 'Action not found' }, 404)
     const params = await c.req.json<Record<string, unknown>>()
     const callerJwt = c.req.header('Authorization')!.slice(7)
@@ -75,6 +75,7 @@ function createActionTools(env: Env, userId: string, callerJwt: string): ActionT
     update: (collection, recordId, data) =>
       execTool('records.update', { collection, recordId, data }),
     remove: (collection, recordId) => execTool('records.delete', { collection, recordId }),
+    deleteWhere: (collection, where, limit) => execTool('records.deleteWhere', { collection, where, limit }),
     get: (collection, recordId) => execTool('records.get', { collection, recordId }),
     query: (collection, options) => execTool('records.query', { collection, ...options }),
     integration: callIntegration,
