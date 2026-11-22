@@ -8,16 +8,12 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { CanvasRoom, CronRoom, JobRoom, PresenceRoom, RecordRoom, YjsRoom } from 'deepspace/worker'
-import type { DOBindings, DOManifest, Job, JobContext } from 'deepspace/worker'
-import { tasks as cronTasks, runTask as runCronTask } from './src/cron.js'
-import { runJob } from './src/jobs.js'
+import type { DOBindings, DOManifest } from 'deepspace/worker'
 import { schemas } from './src/schemas.js'
-import { registerActionRoutes } from './src/server/action-routes.js'
 import {
-  registerAuthAndIntegrationRoutes,
+  registerAuthRoutes,
   registerPlatformProxyRoutes,
   registerStaticRoutes,
-  resolveAuth,
 } from './src/server/http-routes.js'
 import { registerRealtimeRoutes } from './src/server/realtime-routes.js'
 import { registerNeuroGrid } from './src/neurogrid/routes'
@@ -40,41 +36,25 @@ export class AppRecordRoom extends RecordRoom<Env> {
   }
 }
 
+// Keep the original classes registered for the deployed Durable Object migration.
+// NeuroGrid exposes only the RecordRoom and coordinator.
 export class AppYjsRoom extends YjsRoom<Env> {}
 export class AppCanvasRoom extends CanvasRoom<Env> {}
 export class AppPresenceRoom extends PresenceRoom<Env> {}
-
-/** Runs the scheduled tasks defined in src/cron.ts. */
 export class AppCronRoom extends CronRoom<Env> {
   constructor(state: DurableObjectState, env: Env) {
-    super(state, env, { tasks: cronTasks })
+    super(state, env, { tasks: [] })
   }
-
-  protected async onTask(taskName: string): Promise<void> {
-    await runCronTask(taskName, this.env)
-  }
+  protected async onTask(): Promise<void> {}
 }
-
-/** Runs durable background work defined in src/jobs.ts. */
 export class AppJobRoom extends JobRoom<Env> {
-  constructor(state: DurableObjectState, env: Env) {
-    super(state, env)
-  }
-
-  protected async onJob(job: Job, context: JobContext): Promise<unknown> {
-    return await runJob(job, context, this.env)
+  protected async onJob(): Promise<never> {
+    throw new Error('No DeepSpace background jobs are configured')
   }
 }
 
 export interface Env extends DOBindings<typeof __DO_MANIFEST__> {
   ASSETS: Fetcher
-  /**
-   * Platform service binding in production; deepspace dev supplies the URL
-   * fallback. Standard app files use the platform's shared, app-scoped R2
-   * bucket rather than a local binding.
-   */
-  PLATFORM_WORKER?: Fetcher
-  PLATFORM_WORKER_URL?: string
   /**
    * HMAC app credential minted on first deploy. Proxy routes omit identity
    * headers when it is absent so upstream services fail closed.
@@ -91,11 +71,6 @@ export interface Env extends DOBindings<typeof __DO_MANIFEST__> {
   DEEPSPACE_APP_ID: string
   OWNER_USER_ID: string
   /**
-   * Long-lived owner JWT used for developer-billed server calls. User-billed
-   * calls always forward the signed-in caller's JWT instead.
-   */
-  APP_OWNER_JWT: string
-  /**
    * Enables the unauthenticated /api/debug/* proxy only when exactly "true".
    * deepspace dev/test set it locally; deployed environments must opt in.
    */
@@ -111,11 +86,8 @@ export type AppContext = { Bindings: Env }
 const app = new Hono<AppContext>()
 app.use('/api/*', cors())
 
-// Registration order is part of the worker contract. The wildcard auth route
-// follows its special cases, AI precedes platform proxies, and static is last.
-registerAuthAndIntegrationRoutes(app)
+registerAuthRoutes(app)
 registerRealtimeRoutes(app)
-registerActionRoutes(app, resolveAuth)
 registerNeuroGrid(app)
 registerPlatformProxyRoutes(app)
 registerStaticRoutes(app)

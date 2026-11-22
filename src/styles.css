@@ -1,21 +1,10 @@
 @import "tailwindcss" source(none);
-@import "./themes.css";
 
 /* Scan local source + SDK components for Tailwind class usage */
 @source "./**/*.{ts,tsx}";
 @source "../node_modules/deepspace/dist/**/*.js";
 
-/*
- * Theming — pure shadcn/ui CSS variables with [data-theme] selectors.
- *
- * The @theme block below holds the default theme (slate). All other themes
- * live in `themes.css` as `[data-theme="<id>"]` override blocks. Switching
- * themes = changing the data-theme attribute on <html> in index.html. No
- * JS, no FOUC.
- *
- * Status colors (success, warning, info) are intentionally NOT themed —
- * they stay consistent across every preset.
- */
+/* Tokens used by the app and the DeepSpace sign-in overlay. */
 @theme {
   /* shadcn core tokens — slate (default): neutral gray on near-black, indigo accent */
   --color-background: #0a0a0a;
@@ -59,43 +48,15 @@
   --color-info: #3b82f6;
   --color-info-foreground: #ffffff;
 
-  /*
-   * Shadows — slate (default). Each theme in themes.css tunes these.
-   *
-   * Toned down 2026-05: previous values were 8px/12px offset with
-   * 32px/40px blur which read as a heavy halo under every Card on
-   * the page. New values are Linear/Stripe-style: barely-there at
-   * rest, slightly more present on hover.
-   *
-   * IMPORTANT: starter components (`Card`, `Dialog`, `CardGrid`,
-   * `Navigation`, `Toast`) intentionally use literal shadow values
-   * via `shadow-[…]` arbitrary-value classes, NOT the
-   * `shadow-card` / `shadow-card-hover` token classes Tailwind v4
-   * generates from this @theme block. Why: Tailwind's @theme directive
-   * compiles these tokens into the utility-class definitions at build
-   * time, and runtime [data-theme] overrides don't always cancel the
-   * baked baseline cleanly — apps switching themes were getting the
-   * slate value carried forward on the compiled `shadow-card` class.
-   * Sidestepping the token system in starter components is the
-   * deterministic fix. See docs/platform/theming-shadows.md.
-   */
   --shadow-card: 0 1px 2px 0 rgba(0, 0, 0, 0.12);
   --shadow-card-hover: 0 2px 8px 0 rgba(0, 0, 0, 0.16);
 
-  /* Shell tokens: the area behind a multi-panel layout, and the raised
-     surface a page renders into. Used by templates whose (app)/_layout is a
-     shell (e.g. copilot's sidebar | panel | chat); a single-column layout
-     simply doesn't reference them. In every theme keep the panel reading as
-     elevated: dark → panel lighter than shell; light → white panel on a
-     faintly darker shell. */
   --color-shell: #0a0a0a;
   --color-shell-panel: #161616;
 
   /* Animations */
   --animate-pulse-glow: pulse-glow 2s ease-in-out infinite;
 }
-
-/* Theme override blocks live in `themes.css` — imported above. */
 
 /*
  * Animation keyframes for shadcn components.
@@ -152,8 +113,6 @@
  */
 @layer base {
   html {
-    /* Default to dark for native form controls (calendar icons, scrollbars).
-     * Light themes opt into `color-scheme: light` in themes.css. */
     color-scheme: dark;
   }
 

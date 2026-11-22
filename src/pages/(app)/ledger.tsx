@@ -14,7 +14,7 @@ export default function Ledger() {
   const { result } = useNetwork(useGridRevision())
   const [blocks, setBlocks] = useState<Block[]>()
   const [error, setError] = useState('')
-  const [outcome, setOutcome] = useState<{ message: string; valid: boolean }>()
+  const [outcome, setOutcome] = useState<{ message: string; head: string; valid: boolean }>()
   const [validating, setValidating] = useState(false)
   const [shown, setShown] = useState(20)
   const height = result?.height
@@ -29,12 +29,13 @@ export default function Ledger() {
 
   async function verify() {
     if (!blocks) return
+    const head = blocks.at(-1)?.hash ?? ''
     setValidating(true)
     try {
       const check = await verifyChain(blocks)
-      setOutcome({ message: 'Verified ' + (check.height + 1) + ' blocks from genesis.', valid: true })
+      setOutcome({ message: 'Verified ' + (check.height + 1) + ' blocks from genesis.', head, valid: true })
     } catch (reason) {
-      setOutcome({ message: reason instanceof Error ? reason.message : 'Verification failed', valid: false })
+      setOutcome({ message: reason instanceof Error ? reason.message : 'Verification failed', head, valid: false })
     } finally { setValidating(false) }
   }
 
@@ -57,7 +58,8 @@ export default function Ledger() {
         <Button className="grid-action" disabled={!blocks || validating} onClick={() => void verify()}><ShieldCheck size={17} />Verify ledger</Button>
         <Button variant="outline" disabled={!blocks} onClick={save}><Download size={17} />Export JSON</Button>
       </div>
-      {outcome && <p role="status" className={outcome.valid ? 'verification-ok' : 'form-error'}>{outcome.message}</p>}
+      {outcome && outcome.head === head?.hash && <p role="status"
+        className={outcome.valid ? 'verification-ok' : 'form-error'}>{outcome.message}</p>}
     </section>
     <section className="surface registry network-section">
       <h2>Blocks</h2>

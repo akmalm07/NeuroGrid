@@ -1,97 +1,38 @@
-/**
- * Multi-user collaboration spec — verifies two users sign in into
- * separate browser contexts and the app distinguishes them.
- *
- * Pre-create the test accounts once (counted against your 10-cap):
- *   npx deepspace test accounts create --email collab-a@deepspace.test --password TestPass123! --name "Collab A"
- *   npx deepspace test accounts create --email collab-b@deepspace.test --password TestPass123! --name "Collab B"
- *
- * The `users` fixture handles sign-in caching (per-account storageState
- * persisted to `~/.deepspace/playwright-states/`), context creation, and
- * cleanup. No need to manage browser contexts manually.
- */
-import { test, expect } from 'deepspace/testing'
+import { test, expect } from '@playwright/test'
+import { signIn, testAccounts } from './helpers/auth'
 
-test('two users render with their own names', async ({ users }) => {
-  const [a, b] = await users(['Collab A', 'Collab B'])
-
-  // /home is dynamic (under src/pages/(app)/), so it mounts the nav shell;
-  // '/' is the static landing and has no navigation.
-  await Promise.all([a.page.goto('/home'), b.page.goto('/home')])
-
-  await expect(a.page.getByTestId('app-navigation')).toBeVisible({ timeout: 15_000 })
-  await expect(b.page.getByTestId('app-navigation')).toBeVisible({ timeout: 15_000 })
-
-  await expect(a.page.getByTestId('nav-user-name')).toContainText('Collab A')
-  await expect(b.page.getByTestId('nav-user-name')).toContainText('Collab B')
-})
-
-test('API status page renders loading success and error states', async ({ users }) => {
-  const [user] = await users(['Collab A'])
-  let shouldFail = false
-  let requestCount = 0
-
-  await user.page.route('**/api/integrations', async (route) => {
-    requestCount += 1
-    if (shouldFail) {
-      await route.fulfill({
-        status: 502,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: false, error: 'Catalog unavailable' }),
+test('node keys are scoped to the account that created them', async ({ browser }) => {
+  const [first, second] = testAccounts()
+  expect(second).toBeDefined()
+  const owner = await browser.newPage()
+  const other = await browser.newPage()
+  try {
+    await Promise.all([owner.goto('/downloads'), other.goto('/downloads')])
+    await Promise.all([signIn(owner, first), signIn(other, second)])
+    const enrollmentRequest = owner.waitForResponse((response) =>
+      new URL(response.url()).pathname === '/api/grid/user/enroll')
+    await owner.getByRole('button', { name: 'Create node key' }).click()
+    const enrollment = await enrollmentRequest
+    expect(enrollment.ok()).toBe(true)
+    const { id } = await enrollment.json()
+    const nodeId = id.split('-')[0]
+    const ownerRow = owner.getByRole('listitem').filter({ hasText: nodeId })
+    try {
+      await expect(ownerRow).toBeVisible()
+      await expect(other.getByRole('listitem').filter({ hasText: nodeId })).toHaveCount(0)
+      const tokenResponse = await other.request.post('/api/auth/token', {
+        data: {}, headers: { Origin: new URL(other.url()).origin },
       })
-      return
+      const { token } = await tokenResponse.json()
+      const denied = await other.request.post('/api/grid/user/revoke', {
+        data: { id }, headers: { Authorization: 'Bearer ' + token },
+      })
+      expect(denied.status()).toBe(404)
+    } finally {
+      await ownerRow.getByRole('button', { name: 'Revoke key' }).click()
+      await expect(ownerRow).toHaveCount(0)
     }
-
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ success: true, data: { integrations: { openai: {}, wikipedia: {} } } }),
-    })
-  })
-
-  await user.page.goto('/api-status')
-  await expect(user.page.getByText('Loading integration catalog...')).toBeVisible()
-  await expect(user.page.getByText('Integration catalog ready')).toBeVisible()
-  await expect(user.page.getByText('2 integrations available.')).toBeVisible()
-
-  shouldFail = true
-  await user.page.getByRole('button', { name: 'Refresh' }).click()
-  await expect(user.page.getByText('Catalog unavailable')).toBeVisible()
-  await expect(user.page.getByText('Showing the last loaded catalog')).toBeVisible()
-  await expect(user.page.getByText('Integration catalog ready')).toBeVisible()
-
-  const urlAfterFailure = user.page.url()
-  const requestsAfterFailure = requestCount
-  await user.page.getByRole('button', { name: 'Refresh' }).click()
-  await expect.poll(() => requestCount).toBeGreaterThan(requestsAfterFailure)
-  expect(user.page.url()).toBe(urlAfterFailure)
-})
-
-test('API status page shows local retry after first-load API failure', async ({ users }) => {
-  const [user] = await users(['Collab A'])
-  let requestCount = 0
-
-  await user.page.route('**/api/integrations', async (route) => {
-    requestCount += 1
-    await route.fulfill({
-      status: 502,
-      contentType: 'application/json',
-      body: JSON.stringify({ success: false, error: 'Catalog unavailable' }),
-    })
-  })
-
-  await user.page.goto('/api-status')
-  await expect(user.page.getByText('Loading integration catalog...')).toBeVisible()
-  await expect(user.page.getByText('Could not load API data')).toBeVisible()
-  await expect(user.page.getByText('Retried 1 time automatically.')).toBeVisible()
-
-  const retryButton = user.page.getByRole('button', { name: 'Retry' })
-  await expect(retryButton).toBeVisible()
-
-  const urlAfterFailure = user.page.url()
-  const requestsAfterFailure = requestCount
-  await retryButton.click()
-  await expect.poll(() => requestCount).toBeGreaterThan(requestsAfterFailure)
-  expect(user.page.url()).toBe(urlAfterFailure)
+  } finally {
+    await Promise.all([owner.close(), other.close()])
+  }
 })

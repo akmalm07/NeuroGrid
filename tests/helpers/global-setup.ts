@@ -13,7 +13,7 @@
  */
 
 const PORT = Number(process.env.DEEPSPACE_PORT ?? 5173)
-const BASE_URL = `http://localhost:${PORT}`
+const BASE_URL = `http://127.0.0.1:${PORT}`
 
 export default async function globalSetup() {
   const maxRetries = 5

@@ -41,15 +41,16 @@ test.describe('Smoke tests', () => {
     expect(offenders).toEqual([])
   })
 
-  test('dynamic app boundary mounts on /home', async ({ page }) => {
+  test('/home redirects to Chat for returning OAuth users', async ({ page }) => {
     await page.goto('/home')
+    await expect(page).toHaveURL(/\/chat$/)
     await expect(page.getByTestId('app-navigation')).toBeVisible({ timeout: 15000 })
   })
 
   test('sign-in button visible when logged out', async ({ page }) => {
     await page.goto('/home')
     await expect(page.getByTestId('nav-sign-in-button')).toBeVisible({ timeout: 15000 })
-    await expect(page.getByTestId('nav-user-name')).toHaveCount(0)
+    await expect(page.getByTestId('nav-sign-out-button')).toHaveCount(0)
   })
 
   test('unknown route shows 404', async ({ page }) => {

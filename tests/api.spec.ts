@@ -1,18 +1,24 @@
 import { test, expect } from '@playwright/test'
 
-test.describe('API tests', () => {
-  test('auth proxy forwards to auth worker', async ({ request }) => {
-    const res = await request.get('/api/auth/ok')
-    expect(res.ok()).toBeTruthy()
-  })
+test('auth proxy forwards to DeepSpace', async ({ request }) => {
+  expect((await request.get('/api/auth/ok')).ok()).toBe(true)
+})
 
-  test('WebSocket endpoint exists', async ({ page }) => {
-    // /home is a dynamic page (under src/pages/(app)/), so mounting it boots
-    // the providers and auto-connects the records WebSocket. The static
-    // landing at '/' deliberately does neither — see smoke.spec.ts.
-    await page.goto('/home')
-    // Wait for the app to connect its WebSocket (it auto-connects on mount)
-    await page.waitForSelector('[data-testid="app-navigation"]', { timeout: 15000 })
-    // If the app loaded and connected, the WS endpoint works
+test('the records WebSocket receives the public grid projection', async ({ page }) => {
+  const frames: string[] = []
+  page.on('websocket', (socket) => {
+    if (decodeURIComponent(new URL(socket.url()).pathname).startsWith('/ws/app:')) {
+      socket.on('framereceived', ({ payload }) => frames.push(String(payload)))
+    }
   })
+  await page.goto('/network')
+  await expect(page.getByRole('heading', { name: 'Network', exact: true, level: 1 })).toBeVisible()
+  await expect.poll(() => frames.some((frame) => frame.includes('grid_status'))).toBe(true)
+})
+
+test('private and retired endpoints stay closed to guests', async ({ request }) => {
+  expect((await request.get('/api/grid/user/account')).status()).toBe(401)
+  expect((await request.post('/api/grid/user/checkout', { data: { credits: 100 } })).status()).toBe(401)
+  expect((await request.get('/api/integrations')).status()).toBe(404)
+  expect((await request.get('/ws/canvas/unused')).status()).toBe(404)
 })

@@ -17,6 +17,8 @@ src/modals.tsx
 .venv/
 __pycache__/
 .playwright/
+.playwright-cli/
+output/playwright/
 .impeccable/
 release-dist/
 *.spec

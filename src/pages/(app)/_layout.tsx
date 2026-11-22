@@ -21,7 +21,9 @@ function AppRoutes() {
         <Suspense fallback={<p className="grid-container page-body">Loading…</p>}><Outlet context={setShowSignIn} /></Suspense>
       </RecordScope>
     </RecordProvider> : <p className="grid-container page-body" role="status">Loading NeuroGrid…</p>}
-    {showSignIn && !isSignedIn && <AuthOverlay providers={['github', 'google']} onClose={() => setShowSignIn(false)} />}
+    {showSignIn && !isSignedIn && <AuthOverlay title="Sign in to NeuroGrid"
+      description="Use your account to chat, view credits, or pair a node."
+      providers={['github', 'google']} onClose={() => setShowSignIn(false)} />}
   </Shell>
 }
 

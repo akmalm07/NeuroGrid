@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
 import { expect, test } from '@playwright/test'
+import { signIn, testAccounts } from './helpers/auth'
 
 const urls = [
   ['/chat', 'Chat'],
@@ -31,17 +31,11 @@ test('ledger verifies in a fresh browser', async ({ page }) => {
 })
 
 test('a signed-in browser runs a live prompt and preserves the reply after reload', async ({ page }) => {
-  const path = process.env.NEUROGRID_TEST_ACCOUNTS
-  test.skip(!path, 'Needs a funded DeepSpace test account and active model workers')
+  test.skip(process.env.NEUROGRID_TEST_INFERENCE !== '1', 'Start the three workers and verifier first')
+  const [account] = testAccounts()
   test.setTimeout(90_000)
-  const [account] = JSON.parse(readFileSync(path!, 'utf8').replace(/^\uFEFF/, ''))
   await page.goto('/chat')
-  const response = await page.request.post('/api/auth/sign-in/email', {
-    data: account, headers: { Origin: new URL(page.url()).origin },
-  })
-  expect(response.status()).toBe(200)
-  await page.reload()
-  await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible()
+  await signIn(page, account)
   await page.getByLabel('Maximum tokens').selectOption('4')
   const prompt = 'Reply with one word: blue. Reference ' + Date.now()
   await page.getByRole('textbox', { name: 'Message' }).fill(prompt)
@@ -50,4 +44,24 @@ test('a signed-in browser runs a live prompt and preserves the reply after reloa
   const completed = await page.locator('.chat-turn').filter({ hasText: prompt }).last().textContent()
   await page.reload()
   await expect(page.locator('.chat-turn').filter({ hasText: prompt }).last()).toHaveText(completed ?? '')
+  await page.getByRole('button', { name: 'Sign out' }).click()
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible()
+  await expect(page.getByText(prompt)).toHaveCount(0)
+})
+
+test('a visitor can quote whole credits but needs to sign in to pay', async ({ page }) => {
+  await page.route('**/api/grid/public/checkout', (route) => route.fulfill({ json: { mode: 'test' } }))
+  await page.goto('/chat')
+  const amount = page.getByLabel('Credits to buy')
+  const checkout = page.getByRole('button', { name: 'Sign in to buy credits' })
+  await amount.fill('99')
+  await expect(checkout).toBeDisabled()
+  await amount.fill('253')
+  await expect(page.locator('output')).toHaveText('$2.53')
+  await checkout.click()
+  await expect(page.getByText('Sign in to NeuroGrid', { exact: true })).toBeVisible()
+  await page.reload()
+  await expect(amount).toHaveValue('253')
 })

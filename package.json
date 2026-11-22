@@ -6,7 +6,7 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "deepspace dev start",
+    "dev": "deepspace dev start --host=127.0.0.1",
     "build": "vite build",
     "preview": "vite preview",
     "login": "deepspace auth login",
@@ -25,7 +25,6 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@base-ui/react": "~1.6.0",
     "@generouted/react-router": "^1.20.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
@@ -37,7 +36,6 @@
     "react-router": "^7.1.0",
     "react-router-dom": "^7.1.0",
     "tailwind-merge": "^2.6.0",
-    "yjs": "^13.6.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -58,6 +56,9 @@
     "vite-plugin-checker": "^0.14.1",
     "vitest": "^4.1.10",
     "wrangler": "^4.79.0"
+  },
+  "overrides": {
+    "esbuild": "0.28.2"
   },
   "private": true
 }

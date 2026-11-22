@@ -19,11 +19,13 @@ export default function Chat() {
   const [prompt, setPrompt] = useState('')
   const [limit, setLimit] = useState(16)
   const [error, setError] = useState('')
+  const [accountError, setAccountError] = useState('')
   const [sending, setSending] = useState(false)
   const [checkoutBusy, setCheckoutBusy] = useState(false)
   const [checkoutError, setCheckoutError] = useState('')
   const [checkoutMode, setCheckoutMode] = useState<'disabled' | 'test' | 'live'>('disabled')
-  const [creditAmount, setCreditAmount] = useState(String(MIN_PURCHASE_CREDITS))
+  const [creditAmount, setCreditAmount] = useState(() =>
+    sessionStorage.getItem('neurogrid:checkout-credits') ?? String(MIN_PURCHASE_CREDITS))
   const requestKey = useRef('')
   const conversation = useRef<HTMLDivElement>(null)
   const data = account && account.owner === userId ? account.data : undefined
@@ -52,9 +54,12 @@ export default function Chat() {
       loading = true
       try {
         const result = await readAccount()
-        if (current) setAccount({ owner, data: result })
+        if (current) {
+          setAccount({ owner, data: result })
+          setAccountError('')
+        }
       } catch (reason) {
-        if (current) setError(explain(reason))
+        if (current) setAccountError(explain(reason))
       } finally { loading = false }
     }
     void refresh()
@@ -84,8 +89,6 @@ export default function Chat() {
       setAccount((previous) => previous?.owner === userId
         ? { owner: userId, data: { ...previous.data,
           jobs: [job, ...previous.data.jobs.filter((item) => item.id !== job.id)] } } : previous)
-      const latest = await readAccount()
-      setAccount({ owner: userId, data: latest })
     } catch (reason) {
       setError(explain(reason))
     } finally { setSending(false) }
@@ -94,12 +97,17 @@ export default function Chat() {
   async function buyCredits(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (checkoutCents === undefined || checkoutBusy) return
-    if (!isSignedIn) { showSignIn(true); return }
+    if (!isSignedIn) {
+      sessionStorage.setItem('neurogrid:checkout-credits', creditAmount)
+      showSignIn(true)
+      return
+    }
     if (!data) return
     setCheckoutBusy(true)
     setCheckoutError('')
     try {
       const { url } = await checkoutCredits(checkoutAmount)
+      sessionStorage.removeItem('neurogrid:checkout-credits')
       window.location.assign(url)
     } catch (reason) {
       setCheckoutError(explain(reason))
@@ -135,14 +143,14 @@ export default function Chat() {
         <form className="composer" onSubmit={send}>
           {error && <p className="form-error" role="alert">{error}</p>}
           <label className="sr-only" htmlFor="prompt">Message</label>
-          <textarea id="prompt" value={prompt} onChange={(event) => updatePrompt(event.target.value)}
+          <textarea id="prompt" value={prompt} disabled={sending} onChange={(event) => updatePrompt(event.target.value)}
             placeholder="Ask NeuroGrid…" rows={2} maxLength={500}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault()
               event.currentTarget.form?.requestSubmit()
             } }} />
           <div className="composer-bottom">
-            <label>Maximum tokens <select value={limit} onChange={(event) => { setLimit(Number(event.target.value)); requestKey.current = '' }}>
+            <label>Maximum tokens <select value={limit} disabled={sending} onChange={(event) => { setLimit(Number(event.target.value)); requestKey.current = '' }}>
               {[4, 8, 16, 24].map((size) => <option key={size}>{size}</option>)}
             </select></label>
             {isSignedIn ? <Button type="submit" className="grid-action" aria-label="Send prompt"
@@ -156,6 +164,7 @@ export default function Chat() {
           <Coins size={21} /><h2>Compute credits</h2>
           {isSignedIn ? <strong className="large-value">{data?.credits ?? '—'}</strong>
             : <button className="text-link" type="button" onClick={() => showSignIn(true)}>Sign in to view your balance</button>}
+          {isSignedIn && accountError && <p className="form-error" role="status">{accountError}</p>}
           {!isSignedIn && <p>New accounts start with {GRANT} free credits while starter credits are available.</p>}
           <p>Up to {fee(limit)} credits reserved. Unused credits come back to your balance.</p>
           {checkoutMode !== 'disabled' && <form className="credit-checkout" aria-labelledby="checkout-title" onSubmit={buyCredits}>

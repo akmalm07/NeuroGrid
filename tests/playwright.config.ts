@@ -6,26 +6,25 @@ import { defineConfig } from '@playwright/test'
  * a busy address fails fast rather than silently rebinding to 5174.
  *
  * To run multiple apps in parallel, give each one a different port:
- *   DEEPSPACE_PORT=5180 npx deepspace dev start  (terminal 1, app A)
- *   DEEPSPACE_PORT=5181 npx deepspace dev start  (terminal 2, app B)
- *   DEEPSPACE_PORT=5180 npx deepspace test run   (terminal 3, against A)
+ *   npx deepspace dev start --port=5180 --host=127.0.0.1
+ *   npx deepspace test run --port=5180
  */
 const PORT = Number(process.env.DEEPSPACE_PORT ?? 5173)
-const hosted = process.env.NEUROGRID_TEST_URL
-const BASE_URL = hosted || `http://localhost:${PORT}`
+const existingServer = process.env.NEUROGRID_TEST_URL
+const BASE_URL = existingServer || `http://127.0.0.1:${PORT}`
 
 export default defineConfig({
   testDir: '.',
   testMatch: '**/*.spec.ts',
-  globalSetup: hosted ? undefined : './helpers/global-setup.ts',
+  globalSetup: existingServer ? undefined : './helpers/global-setup.ts',
   timeout: 30_000,
   retries: 0,
   use: {
     baseURL: BASE_URL,
     headless: true,
   },
-  webServer: hosted ? undefined : {
-    command: `npx vite --port ${PORT} --strictPort --host`,
+  webServer: existingServer ? undefined : {
+    command: `npx vite --port ${PORT} --strictPort --host 127.0.0.1`,
     cwd: '..',
     url: BASE_URL,
     reuseExistingServer: true,
