@@ -7,7 +7,7 @@ import { startCheckout, stripeOutcome, stripeSettings, verifyStripeSignature, ty
 const GROUPS: Record<string, Record<string, string>> = {
   public: { network: 'GET', ledger: 'GET' },
   user: { account: 'GET', request: 'POST', enroll: 'POST', revoke: 'POST', checkout: 'POST' },
-  node: { profile: 'GET', claim: 'POST', result: 'POST', pause: 'POST' },
+  node: { profile: 'GET', claim: 'POST', ping: 'POST', result: 'POST', pause: 'POST' },
   reference: { claim: 'POST', result: 'POST' },
 }
 

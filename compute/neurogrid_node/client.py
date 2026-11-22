@@ -41,14 +41,14 @@ class GridClient:
         self.secret = secret.strip()
         self.opener = build_opener(NoRedirect())
 
-    def call(self, action: str, data: dict | None = None) -> dict:
+    def call(self, action: str, data: dict | None = None, *, timeout: float = 15) -> dict:
         body = json.dumps({"revision": REVISION, **data}).encode() if data is not None else None
         req = Request(f"{self.base}/{action}", data=body, headers={
             "Content-Type": "application/json", "Authorization": f"Bearer {self.secret}",
             "User-Agent": USER_AGENT,
         })
         try:
-            with self.opener.open(req, timeout=15) as response:
+            with self.opener.open(req, timeout=timeout) as response:
                 return json.loads(response.read(900_000))
         except HTTPError as exc:
             try:
@@ -69,7 +69,7 @@ def run_node(client, stop, threads=2, duty=100, model_path=None, report=print):
         report(f"Online · {profile['id']} · hosting partition {profile['shard'] + 1}")
     while not stop.is_set():
         try:
-            response = client.call("claim", {})
+            response = client.call("claim", {"probe": True})
             work = response.get("work")
             if work and not stop.is_set():
                 report(f"Computing · partition {partition.index + 1}")
@@ -81,6 +81,12 @@ def run_node(client, stop, threads=2, duty=100, model_path=None, report=print):
                     report(f"Result submitted · hosting partition {partition.index + 1}")
                 stop.wait(compute_time * (100 / duty - 1))
             else:
+                probe = response.get("probe")
+                if isinstance(probe, str) and not stop.is_set():
+                    try:
+                        client.call("ping", {"probe": probe}, timeout=2)
+                    except (GridError, OSError, ValueError):
+                        pass  # An optional latency sample must not interrupt work polls.
                 stop.wait(0.3 if response.get("active") else 5)
         except GridError as exc:
             if exc.status in (401, 403) or str(exc) == "model_mismatch":

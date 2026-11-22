@@ -36,3 +36,5 @@ unset NEUROGRID_SECRET
 ```
 
 The agent prints its node ID, assigned partition, and work status. Use `--help` to see options and Ctrl+C to stop. On Linux, a service manager can run the same foreground command and stop it with SIGTERM. Use a separate node key per process.
+
+Desktop and headless clients starting with v0.1.4 periodically reply to a coordinator ping so the network can prefer lower-latency workers. To upgrade an existing installation, stop the node, extract the release over its existing files, rerun the installer, and restart the node.

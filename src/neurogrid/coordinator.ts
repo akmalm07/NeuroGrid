@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import { DurableObject } from 'cloudflare:workers'
 import type { Env } from '../../worker'
 import { EMPTY_HASH, TREASURY } from './ledger'
+import { firstWorker, issueProbe, recordProbe, type WorkerLatency } from './latency'
 import { stripeSettings, type CreditOrder } from './payments'
 import {
   CONTEXT, GRANT, MAX_TOKENS, REVISION, SUPPLY, VOCAB, WIDTH, blockBytes, fee,
@@ -17,7 +18,7 @@ const isInteger = (value: unknown, min: number, max: number): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max
 const validToken = (value: unknown): value is number => isInteger(value, 0, VOCAB - 1)
 
-interface Node {
+interface Node extends WorkerLatency {
   id: string
   owner: string
   shard: number
@@ -346,13 +347,25 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
     if (data.revision !== REVISION) throw new Rejection('model_mismatch', 400)
     if (action === 'pause') {
       node.paused = true
+      delete node.probe
+      delete node.latency
       this.sql.exec('UPDATE nodes SET data = ? WHERE key = ?', JSON.stringify(node), key)
       this.release(node.id, now)
       return { ok: true }
     }
+    if (action === 'ping') {
+      const pingMs = this.available(node, now) ? recordProbe(node, data.probe, now) : undefined
+      if (pingMs === undefined) throw new Rejection('stale_probe')
+      this.sql.exec('UPDATE nodes SET data = ? WHERE key = ?', JSON.stringify(node), key)
+      return { pingMs }
+    }
     const job = this.activeJob()
     const length = job ? job.tokens.length + job.generated.length : 0
     if (action === 'claim') {
+      if (!this.available(node, now)) {
+        delete node.probe
+        delete node.latency
+      }
       node.seen = now
       node.paused = false
       let work = null
@@ -360,8 +373,7 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
         const eligible = this.nodes().filter((other) => other.shard === node.shard && other.id !== node.id
           && this.available(other, now) && !job.attempted.includes(other.id))
         eligible.push(node)
-        eligible.sort((a, b) => a.assigned - b.assigned || a.id.localeCompare(b.id))
-        if (eligible[0].id === node.id) {
+        if (firstWorker(eligible, now)?.id === node.id) {
           node.assigned = now
           job.attempted.push(node.id)
           job.lease = { id: crypto.randomUUID(), node: node.id, owner: node.owner, expires: now + WORK_MS }
@@ -370,8 +382,9 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
           work = { lease: job.lease.id, input: this.input(job), length }
         }
       }
+      const probe = !work && data.probe === true ? issueProbe(node, now) : undefined
       this.sql.exec('UPDATE nodes SET data = ? WHERE key = ?', JSON.stringify(node), key)
-      return { work, active: Boolean(job) }
+      return { work, active: Boolean(job), probe }
     }
     if (action !== 'result') throw new Rejection('not_found', 404)
     if (!job || job.status !== 'working' || job.lease?.id !== data.lease || job.lease?.node !== node.id) {
