@@ -7,11 +7,11 @@ import signal
 import time
 from pathlib import Path
 from threading import Event
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from .model import REVISION, Partition, Verifier, checkpoint, configure_cpu
+from . import REVISION
 
 USER_AGENT = "NeuroGrid-Node/0.1"
 
@@ -59,11 +59,25 @@ class GridClient:
 
 
 def run_node(client, stop, threads=2, duty=100, model_path=None, report=print):
-    configure_cpu(threads)
-    profile = client.call("profile")
+    while not stop.is_set():
+        try:
+            profile = client.call("profile")
+            break
+        except GridError as exc:
+            if exc.status < 500 and exc.status != 429:
+                raise
+            report(f"Coordinator unavailable · retrying after {exc}")
+        except (OSError, ValueError):
+            report("Coordinator unreachable · retrying")
+        stop.wait(4)
+    else:
+        return
     if profile["revision"] != REVISION:
         raise ValueError("This application uses a different checkpoint revision")
     report(f"Loading partition {profile['shard'] + 1} on CPU")
+    from .model import Partition, checkpoint, configure_cpu
+
+    configure_cpu(threads)
     partition = Partition(model_path or checkpoint(), profile["shard"])
     if not stop.is_set():
         report(f"Online · {profile['id']} · hosting partition {profile['shard'] + 1}")
@@ -77,8 +91,11 @@ def run_node(client, stop, threads=2, duty=100, model_path=None, report=print):
                 result = partition.run(work["input"], work["length"])
                 compute_time = time.monotonic() - start
                 if not stop.is_set():
-                    client.call("result", {"lease": work["lease"], **result})
-                    report(f"Result submitted · hosting partition {partition.index + 1}")
+                    reply = client.call("result", {"lease": work["lease"], **result})
+                    if reply.get("accepted"):
+                        report(f"Result submitted · hosting partition {partition.index + 1}")
+                    else:
+                        report(f"Result rejected · {reply.get('reason', 'request_failed')}")
                 stop.wait(compute_time * (100 / duty - 1))
             else:
                 probe = response.get("probe")
@@ -94,18 +111,20 @@ def run_node(client, stop, threads=2, duty=100, model_path=None, report=print):
             if str(exc) != "stale_lease":
                 report(f"Retrying after {exc}")
                 stop.wait(3)
-        except (OSError, ValueError, URLError):
+        except (OSError, ValueError):
             report("Coordinator unreachable · retrying")
             stop.wait(4)
     try:
         client.call("pause", {})
-    except (GridError, OSError, URLError):
+    except (GridError, OSError, ValueError):
         pass  # Heartbeat expiration releases the node even when disconnected.
 
 
 def run_verifier(client, stop, threads=2, model_path=None, report=print):
-    configure_cpu(threads)
     report("Loading trusted reference")
+    from .model import Verifier, checkpoint, configure_cpu
+
+    configure_cpu(threads)
     verifier = Verifier(model_path or checkpoint())
     report("Verifier ready")
     while not stop.is_set():
@@ -123,7 +142,7 @@ def run_verifier(client, stop, threads=2, model_path=None, report=print):
             if str(exc) != "stale_verification":
                 report(f"Verifier retrying after {exc}")
                 stop.wait(2)
-        except (OSError, URLError):
+        except (OSError, ValueError):
             stop.wait(3)
 
 
@@ -154,7 +173,7 @@ def main() -> None:
             run_verifier(client, stop, threads=args.threads, model_path=args.model, report=report)
         else:
             run_node(client, stop, threads=args.threads, duty=args.duty, model_path=args.model, report=report)
-    except (GridError, OSError, ValueError) as exc:
+    except (GridError, OSError, RuntimeError, ValueError) as exc:
         parser.exit(1, f"NeuroGrid: {exc}\n")
 
 

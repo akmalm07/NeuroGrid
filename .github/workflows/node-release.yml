@@ -40,7 +40,9 @@ jobs:
           if ($shortcut.Arguments -ne '-m neurogrid_node.desktop' -or -not (Test-Path $shortcut.TargetPath)) { throw 'Start menu shortcut is invalid' }
           $env:QT_QPA_PLATFORM = 'offscreen'
           ./node-install/.venv/Scripts/python.exe -m neurogrid_node.desktop --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop launch failed' }
           ./node-install/.venv/Scripts/python.exe -c "from neurogrid_node.model import Partition, checkpoint, configure_cpu; configure_cpu(2); assert Partition(checkpoint(), 0).run({'tokens': [1]}, 1)['tensor']"
+          if ($LASTEXITCODE -ne 0) { throw 'CPU shard inference failed' }
       - if: matrix.platform == 'linux'
         run: |
           sudo apt-get update

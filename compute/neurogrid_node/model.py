@@ -15,8 +15,9 @@ from transformers.models.llama.modeling_llama import (
     LlamaRotaryEmbedding,
 )
 
+from . import REVISION
+
 MODEL = "HuggingFaceTB/SmolLM2-135M-Instruct"
-REVISION = "12fd25f77366fa6b3b4b768ec3050bf629380bac"
 WIDTH = 576
 CONTEXT = 128
 VOCAB = 49152

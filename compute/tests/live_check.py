@@ -110,7 +110,7 @@ def main():
         assert call(origin, "/api/grid/user/account")[0] == 401
         initial_requester, initial_worker = account(requester)["credits"], account(worker)["credits"]
         assert initial_requester >= 39, "The test requester needs at least 39 credits"
-        run_agent("reference", reference_key)
+        reference = run_agent("reference", reference_key)
         left, middle, right = (enroll(shard) for shard in range(3))
         node_b, node_c = (run_agent("node", node["secret"]) for node in (middle, right))
         dormant = GridClient(origin, left["secret"])
@@ -163,11 +163,12 @@ def main():
 
         if args.keep_online:
             dormant.call("pause", {})
-            run_agent("node", backup["secret"])
+            node_a = run_agent("node", backup["secret"])
             wait_until(ready, "demo capacity")
             print("DEMO READY · 3 worker processes and the verifier on this host. Ctrl+C pauses them.", flush=True)
-            while all(process.poll() is None for process in (node_b, node_c)):
+            while all(process.poll() is None for process in (node_a, node_b, node_c, reference)):
                 time.sleep(5)
+            raise AssertionError("A demo process stopped")
     finally:
         for process in children:
             stop(process)
