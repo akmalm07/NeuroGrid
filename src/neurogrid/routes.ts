@@ -16,6 +16,11 @@ export function registerNeuroGrid(app: Hono<AppContext>) {
     maxSize: 410_000,
     onError: (c) => c.json({ error: 'body_too_large' }, 413),
   }))
+  app.get('/api/grid/public/checkout', (c) => {
+    const settings = stripeSettings(c.env)
+    return c.json({ mode: settings ? (settings.live ? 'live' : 'test') : 'disabled' }, 200,
+      { 'Cache-Control': 'no-store' })
+  })
   app.post('/api/grid/stripe/webhook', async (c) => {
     const settings = stripeSettings(c.env)
     if (!settings) return c.notFound()

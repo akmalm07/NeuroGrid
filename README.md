@@ -27,16 +27,15 @@ DeepSpace supplies OAuth, SQLite Durable Objects, the RecordRoom subscription an
 
 ## Stripe Checkout
 
-Checkout is disabled until configured. Signed-in users can still get 100 starter credits while the treasury can fund grants. Paid packs are an optional way to buy access to inference. The DeepSpace Worker creates Checkout Sessions through Stripe and verifies payment events. The Durable Object reserves credits before each session and updates the balance and ledger atomically after payment confirmation.
+When Stripe is configured, visitors can quote a purchase on Chat and sign in to complete it. The rate is 100 compute credits per US dollar. Choose 100–10,000 whole credits per order for $1.00–$100.00. Signed-in users can still get 100 starter credits while the treasury can fund grants. The DeepSpace Worker creates Checkout Sessions through Stripe and verifies payment events. The Durable Object reserves credits before each session and updates the balance and ledger atomically after payment confirmation.
 
-Configure all four values using the DeepSpace secrets store. Use an isolated DeepSpace app and Stripe sandbox to test before enabling real payments.
+Configure these values using the DeepSpace secrets store. Use an isolated DeepSpace app and Stripe sandbox to test before enabling real payments.
 
 | Setting | Value |
 | --- | --- |
 | `NEUROGRID_STRIPE_KEY` | Stripe secret or restricted key with permission to create Checkout Sessions |
 | `NEUROGRID_STRIPE_WEBHOOK` | Endpoint signing secret from Stripe |
 | `NEUROGRID_STRIPE_ORIGIN` | Your app's HTTPS origin without a trailing slash |
-| `NEUROGRID_STRIPE_PACK` | Pack size and USD cents separated by a colon, for example `500:500` |
 
 In Stripe, point an event destination to `/api/grid/stripe/webhook` on that origin. Subscribe to `checkout.session.completed`, `checkout.session.expired`, `checkout.session.async_payment_succeeded`, and `checkout.session.async_payment_failed`. Complete an end-to-end sandbox purchase, expire an unpaid session, and resend a paid event before going live. Resolve outstanding test reservations in the sandbox.
 

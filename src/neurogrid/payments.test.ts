@@ -1,8 +1,18 @@
 import { createHmac } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { startCheckout, stripeOutcome, verifyStripeSignature } from './payments'
+import { purchaseCents } from './protocol'
 
 const id = '1e27e7d5-659d-4c6b-9f6e-c6c61f657bc0'
+
+it('prices whole-credit orders at one cent per credit, with a one-dollar minimum', () => {
+  expect(purchaseCents(100)).toBe(100)
+  expect(purchaseCents(253)).toBe(253)
+  expect(purchaseCents(10_000)).toBe(10_000)
+  for (const invalid of [99, 100.1, 10_001, '100', null, undefined, Infinity]) {
+    expect(purchaseCents(invalid)).toBeUndefined()
+  }
+})
 const event = (type: string, status: string, paymentStatus: string) => JSON.stringify({
   type, livemode: false, data: { object: {
     object: 'checkout.session', id: 'cs_test_example', mode: 'payment',
@@ -46,10 +56,9 @@ it('retries Checkout creation with a stable idempotency key and the reserved pri
     Response.json({ status: 'open', url: 'https://checkout.stripe.com/example' }))
   vi.stubGlobal('fetch', fetchStripe)
   try {
-    const settings = { key: 'sk_test_fixture', secret: 'whsec_fixture', origin: 'https://neurogrid.app.space',
-      credits: 1_000, cents: 900, live: false }
+    const settings = { key: 'sk_test_fixture', secret: 'whsec_fixture', origin: 'https://neurogrid.app.space', live: false }
     const order = { id, owner: 'acct:test', created: 0, origin: settings.origin, live: false,
-      credits: 500, cents: 500, status: 'pending' as const }
+      credits: 253, cents: 253, status: 'pending' as const }
     await expect(startCheckout(settings, order)).resolves.toBe('https://checkout.stripe.com/example')
     await startCheckout(settings, order)
     const first = fetchStripe.mock.calls[0][1]
@@ -57,7 +66,7 @@ it('retries Checkout creation with a stable idempotency key and the reserved pri
     expect(first?.headers).toMatchObject({ 'Idempotency-Key': `neurogrid-${id}` })
     expect(second?.headers).toEqual(first?.headers)
     expect(String(second?.body)).toBe(String(first?.body))
-    expect(new URLSearchParams(String(first?.body)).get('line_items[0][price_data][unit_amount]')).toBe('500')
+    expect(new URLSearchParams(String(first?.body)).get('line_items[0][price_data][unit_amount]')).toBe('253')
   } finally {
     vi.unstubAllGlobals()
   }

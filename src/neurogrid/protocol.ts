@@ -6,6 +6,14 @@ export const WIDTH = 576
 export const VOCAB = 49152
 export const SUPPLY = 100_000
 export const GRANT = 100
+export const MIN_PURCHASE_CREDITS = 100
+export const MAX_PURCHASE_CREDITS = 10_000
+
+// 100 credits per dollar. Keep all prices in integer USD cents.
+export function purchaseCents(credits: unknown): number | undefined {
+  if (typeof credits === 'number' && Number.isSafeInteger(credits)
+      && credits >= MIN_PURCHASE_CREDITS && credits <= MAX_PURCHASE_CREDITS) return credits
+}
 export const POLL_MS = 1_000
 export const SHARDS = [
   { title: 'Input', layers: '01–10', detail: 'Token embeddings and the first ten transformer layers' },

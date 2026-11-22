@@ -14,15 +14,10 @@ export interface CreditOrder extends CreditPack {
 
 export function stripeSettings(env: Env) {
   const { NEUROGRID_STRIPE_KEY: key, NEUROGRID_STRIPE_WEBHOOK: secret,
-    NEUROGRID_STRIPE_PACK: pack, NEUROGRID_STRIPE_ORIGIN: origin } = env
+    NEUROGRID_STRIPE_ORIGIN: origin } = env
   if (!key || !/^(sk|rk)_(test|live)_[A-Za-z0-9]+$/.test(key)
       || !secret?.startsWith('whsec_') || !origin || !/^https:\/\/[a-z0-9.-]+$/.test(origin)) return
-  const match = /^(\d{1,4}):(\d{2,5})$/.exec(pack ?? '')
-  if (!match) return
-  const credits = Number(match[1])
-  const cents = Number(match[2])
-  if (credits < 1 || cents < 100) return
-  return { key, secret, origin, credits, cents, live: key.includes('_live_') }
+  return { key, secret, origin, live: key.includes('_live_') }
 }
 
 export async function startCheckout(settings: NonNullable<ReturnType<typeof stripeSettings>>, order: CreditOrder) {

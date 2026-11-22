@@ -3,7 +3,7 @@ import type { Block, JobSummary, NetworkSnapshot } from './protocol'
 
 export interface Account {
   credits: number
-  creditPack?: { credits: number; cents: number; live: boolean }
+  pendingCheckout?: { credits: number; cents: number }
   jobs: JobSummary[]
   nodes: { id: string; shard: number; paused: boolean; expires: number }[]
 }
@@ -21,7 +21,9 @@ export const messages: Record<string, string> = {
   partition_unavailable: 'A partition lost its worker. Your reserved credits were returned.',
   node_limit: 'You have reached the node limit. Revoke an unused key to make room.',
   rate_limit: 'Too many requests. Try again in a minute.',
-  credits_sold_out: 'This credit pack is sold out. You can still use your balance.',
+  credits_sold_out: 'The treasury has fewer credits available. Try a smaller amount.',
+  invalid_credit_amount: 'Enter a whole number from 100 to 10,000 credits.',
+  checkout_amount_locked: 'You already have a checkout open. Continue that checkout or wait for it to expire.',
   checkout_pending: 'Could not open checkout. If you already paid, wait for your balance to update before trying again.',
 }
 
@@ -49,7 +51,8 @@ async function request<T>(path: string, data?: object): Promise<T> {
 
 export const readNetwork = () => request<NetworkSnapshot>('public/network')
 export const readAccount = () => request<Account>('user/account')
-export const checkoutCredits = () => request<{ url: string }>('user/checkout', {})
+export const readCheckoutMode = () => request<{ mode: 'disabled' | 'test' | 'live' }>('public/checkout')
+export const checkoutCredits = (credits: number) => request<{ url: string }>('user/checkout', { credits })
 export const enroll = (shard: string) => request<Enrollment>('user/enroll', shard === 'auto' ? {} : { shard: Number(shard) })
 export const revoke = (id: string) => request<{ ok: boolean }>('user/revoke', { id })
 export const submit = (prompt: string, maxTokens: number, key: string) =>

@@ -103,7 +103,6 @@ export interface Env extends DOBindings<typeof __DO_MANIFEST__> {
   NEUROGRID_VERIFIER_SECRET?: string
   NEUROGRID_STRIPE_KEY?: string
   NEUROGRID_STRIPE_WEBHOOK?: string
-  NEUROGRID_STRIPE_PACK?: string
   NEUROGRID_STRIPE_ORIGIN?: string
 }
 

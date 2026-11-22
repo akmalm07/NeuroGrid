@@ -5,7 +5,7 @@ import { EMPTY_HASH, TREASURY } from './ledger'
 import { firstWorker, issueProbe, recordProbe, type WorkerLatency } from './latency'
 import { stripeSettings, type CreditOrder } from './payments'
 import {
-  CONTEXT, GRANT, MAX_TOKENS, REVISION, SUPPLY, VOCAB, WIDTH, blockBytes, fee,
+  CONTEXT, GRANT, MAX_TOKENS, REVISION, SUPPLY, VOCAB, WIDTH, blockBytes, fee, purchaseCents,
   type Block, type BlockData, type BlockKind, type JobSummary, type NetworkSnapshot, type Transfer,
 } from './protocol'
 
@@ -112,22 +112,25 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
     this.append('grant', account, [[TREASURY, -GRANT], [account, GRANT]], now)
   }
 
-  private checkout(account: string, now: number) {
-    const pack = stripeSettings(this.env)
-    if (!pack) throw new Rejection('checkout_disabled', 503)
+  private checkout(account: string, credits: unknown, now: number) {
+    const settings = stripeSettings(this.env)
+    if (!settings) throw new Rejection('checkout_disabled', 503)
     const existing = this.read<CreditOrder>("SELECT data FROM credit_orders WHERE owner = ? AND status = 'pending'", account)
     if (existing) {
       // Stripe may prune idempotency keys after 24 hours. Never open a second
       // session for an order beyond that window.
-      if (existing.live !== pack.live || now - existing.created >= 23 * 3_600_000) {
+      if (existing.live !== settings.live || now - existing.created >= 23 * 3_600_000) {
         throw new Rejection('checkout_pending')
       }
+      if (credits !== existing.credits) throw new Rejection('checkout_amount_locked')
       return existing
     }
+    const cents = purchaseCents(credits)
+    if (cents === undefined) throw new Rejection('invalid_credit_amount', 400)
     this.grant(account, now)
-    if (this.balance(TREASURY) < pack.credits + GRANT) throw new Rejection('credits_sold_out')
-    const order: CreditOrder = { id: crypto.randomUUID(), owner: account, credits: pack.credits,
-      cents: pack.cents, created: now, live: pack.live, origin: pack.origin, status: 'pending' }
+    if (this.balance(TREASURY) < cents + GRANT) throw new Rejection('credits_sold_out')
+    const order: CreditOrder = { id: crypto.randomUUID(), owner: account, credits: cents,
+      cents, created: now, live: settings.live, origin: settings.origin, status: 'pending' }
     this.append('checkout', order.id, [[TREASURY, -order.credits], [`checkout:${order.id}`, order.credits]], now)
     this.sql.exec('INSERT INTO credit_orders VALUES (?, ?, ?, ?)', order.id, account, order.status, JSON.stringify(order))
     return order
@@ -259,12 +262,11 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
     switch (action) {
       case 'account': {
         this.grant(account, now)
-        const pack = stripeSettings(this.env)
-        const order = pack && this.read<CreditOrder>(
+        const order = this.read<CreditOrder>(
           "SELECT data FROM credit_orders WHERE owner = ? AND status = 'pending'", account)
         return {
           credits: this.balance(account),
-          creditPack: pack && { credits: order?.credits ?? pack.credits, cents: order?.cents ?? pack.cents, live: pack.live },
+          pendingCheckout: order && { credits: order.credits, cents: order.cents },
           jobs: this.readAll<Job>('SELECT data FROM jobs WHERE owner = ? ORDER BY created DESC LIMIT 20', account)
             .map((job) => this.summary(job)),
           nodes: this.readAll<Node>('SELECT data FROM nodes WHERE owner = ? ORDER BY id', account)
@@ -273,7 +275,7 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
         }
       }
       case 'checkout':
-        return this.checkout(account, now)
+        return this.checkout(account, data.credits, now)
       case 'enroll': {
         this.sql.exec('DELETE FROM nodes WHERE json_extract(data, \'$.expires\') <= ?', now)
         const nodes = this.nodes()

@@ -115,6 +115,14 @@
 .side-panel h2, .ledger-summary h2 { font-size: 15px; font-weight: 650; margin: 8px 0 6px; }
 .large-value { display: block; font-size: 35px; font-weight: 680; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
 .side-panel p, .page-note, .download-card p { color: var(--secondary); font-size: 14px; line-height: 1.6; margin-top: 7px; }
+.credit-checkout { display: grid; gap: 10px; margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--rule); }
+.credit-checkout h3 { font-size: 15px; font-weight: 650; }
+.credit-checkout p { margin: 0; }
+.credit-checkout .form-error { color: #ffb8b6; }
+.credit-amount { display: grid; gap: 5px; font-size: 14px; }
+.credit-amount input { width: 100%; min-width: 0; padding: 9px 12px; border: 1px solid #3b4560; border-radius: 7px; background: #0b0f1b; color: var(--ink); }
+.credit-total { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 14px; }
+.credit-total output { font-size: 19px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .pipeline { display: grid; margin: 14px 0; gap: 7px; }
 .pipeline li { display: flex; align-items: center; gap: 9px; padding: 8px; border-radius: 6px; }
 .pipeline li.current { background: #252747; }
