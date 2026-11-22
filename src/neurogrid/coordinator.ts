@@ -528,18 +528,20 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
           case 'user': {
             const id = request.headers.get('X-Grid-User')
             if (!id) throw new Rejection('unauthorized', 401)
-            const account = `acct:${hash(id).slice(0, 24)}`
-            if (action !== 'checkout') return this.user(action, account, data, now)
-            const mode = request.headers.get('X-Grid-Checkout-Mode')
-            const origin = request.headers.get('X-Grid-Checkout-Origin')
-            if ((mode !== 'live' && mode !== 'test') || !origin) throw new Rejection('checkout_disabled', 503)
-            return this.checkout(account, data.credits, now, mode === 'live', origin)
+            return this.user(action, `acct:${hash(id).slice(0, 24)}`, data, now)
           }
           case 'node':
             return this.worker(action, request.headers.get('X-Grid-Credential') ?? '', data, now)
-          case 'payments':
-            if (action !== 'outcome') throw new Rejection('not_found', 404)
-            return this.applyCheckout(data, now)
+          case 'payments': {
+            if (action === 'outcome') return this.applyCheckout(data, now)
+            if (action !== 'reserve') throw new Rejection('not_found', 404)
+            const id = request.headers.get('X-Grid-User')
+            if (!id) throw new Rejection('unauthorized', 401)
+            if (typeof data.live !== 'boolean' || typeof data.origin !== 'string') {
+              throw new Rejection('invalid_checkout_context', 500)
+            }
+            return this.checkout(`acct:${hash(id).slice(0, 24)}`, data.credits, now, data.live, data.origin)
+          }
           case 'reference': {
             const secret = this.env.NEUROGRID_VERIFIER_SECRET
             if (!secret || !timingSafeEqual(Buffer.from(hash(secret)),
