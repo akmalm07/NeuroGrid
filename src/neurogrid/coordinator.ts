@@ -3,7 +3,7 @@ import { DurableObject } from 'cloudflare:workers'
 import type { Env } from '../../worker'
 import { EMPTY_HASH, TREASURY } from './ledger'
 import { firstWorker, issueProbe, recordProbe, type WorkerLatency } from './latency'
-import { stripeSettings, type CreditOrder } from './payments'
+import type { CreditOrder } from './payments'
 import {
   CONTEXT, GRANT, MAX_TOKENS, REVISION, SUPPLY, VOCAB, WIDTH, blockBytes, fee, purchaseCents,
   type Block, type BlockData, type BlockKind, type JobSummary, type NetworkSnapshot, type Transfer,
@@ -112,14 +112,12 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
     this.append('grant', account, [[TREASURY, -GRANT], [account, GRANT]], now)
   }
 
-  private checkout(account: string, credits: unknown, now: number) {
-    const settings = stripeSettings(this.env)
-    if (!settings) throw new Rejection('checkout_disabled', 503)
+  private checkout(account: string, credits: unknown, now: number, live: boolean, origin: string) {
     const existing = this.read<CreditOrder>("SELECT data FROM credit_orders WHERE owner = ? AND status = 'pending'", account)
     if (existing) {
       // Stripe may prune idempotency keys after 24 hours. Never open a second
       // session for an order beyond that window.
-      if (existing.live !== settings.live || now - existing.created >= 23 * 3_600_000) {
+      if (existing.live !== live || now - existing.created >= 23 * 3_600_000) {
         throw new Rejection('checkout_pending')
       }
       if (credits !== existing.credits) throw new Rejection('checkout_amount_locked')
@@ -130,7 +128,7 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
     this.grant(account, now)
     if (this.balance(TREASURY) < cents + GRANT) throw new Rejection('credits_sold_out')
     const order: CreditOrder = { id: crypto.randomUUID(), owner: account, credits: cents,
-      cents, created: now, live: settings.live, origin: settings.origin, status: 'pending' }
+      cents, created: now, live, origin, status: 'pending' }
     this.append('checkout', order.id, [[TREASURY, -order.credits], [`checkout:${order.id}`, order.credits]], now)
     this.sql.exec('INSERT INTO credit_orders VALUES (?, ?, ?, ?)', order.id, account, order.status, JSON.stringify(order))
     return order
@@ -274,8 +272,6 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
             .map(({ id, shard, paused, expires }) => ({ id, shard, paused, expires })),
         }
       }
-      case 'checkout':
-        return this.checkout(account, data.credits, now)
       case 'enroll': {
         this.sql.exec('DELETE FROM nodes WHERE json_extract(data, \'$.expires\') <= ?', now)
         const nodes = this.nodes()
@@ -532,7 +528,12 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
           case 'user': {
             const id = request.headers.get('X-Grid-User')
             if (!id) throw new Rejection('unauthorized', 401)
-            return this.user(action, `acct:${hash(id).slice(0, 24)}`, data, now)
+            const account = `acct:${hash(id).slice(0, 24)}`
+            if (action !== 'checkout') return this.user(action, account, data, now)
+            const mode = request.headers.get('X-Grid-Checkout-Mode')
+            const origin = request.headers.get('X-Grid-Checkout-Origin')
+            if ((mode !== 'live' && mode !== 'test') || !origin) throw new Rejection('checkout_disabled', 503)
+            return this.checkout(account, data.credits, now, mode === 'live', origin)
           }
           case 'node':
             return this.worker(action, request.headers.get('X-Grid-Credential') ?? '', data, now)

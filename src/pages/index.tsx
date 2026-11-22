@@ -48,7 +48,7 @@ export default function Home() {
         <div className="workflow-grid">{process.map(({ icon: Icon, title, text }) => <article key={title}>
           <Icon size={24} /><h3>{title}</h3><p>{text}</p>
         </article>)}</div>
-        <p className="workflow-note">The coordinator verifies outputs and records settlements in a SHA-256 ledger. Credits are for the demo and have no monetary value. <Link to="/ledger">Explore the ledger <ArrowRight size={16} /></Link></p>
+        <p className="workflow-note">The coordinator verifies outputs and records settlements in a SHA-256 ledger. Credits are spendable on NeuroGrid inference and cannot be redeemed for cash. <Link to="/ledger">Explore the ledger <ArrowRight size={16} /></Link></p>
       </div>
     </section>
   </Shell>

@@ -40,6 +40,7 @@ export function registerNeuroGrid(app: Hono<AppContext>) {
     if (!Object.hasOwn(GROUPS, role) || !Object.hasOwn(GROUPS[role], action)
         || GROUPS[role][action] !== c.req.method) return c.notFound()
     const headers = new Headers({ 'Content-Type': 'application/json' })
+    const checkout = role === 'user' && action === 'checkout'
     if (role === 'user') {
       const auth = await resolveAuth(c.req.raw, c.env)
       if (!auth) return c.json({ error: 'unauthorized' }, 401)
@@ -51,14 +52,18 @@ export function registerNeuroGrid(app: Hono<AppContext>) {
       }
       headers.set('X-Grid-Credential', authorization.slice(7))
     }
+    const settings = checkout ? stripeSettings(c.env) : undefined
+    if (checkout) {
+      if (!settings) return c.json({ error: 'checkout_disabled' }, 503)
+      headers.set('X-Grid-Checkout-Mode', settings.live ? 'live' : 'test')
+      headers.set('X-Grid-Checkout-Origin', settings.origin)
+    }
     const stub = c.env.NEUROGRID.getByName('main')
     const query = new URL(c.req.url).search
     const response = await stub.fetch(`https://neurogrid.internal/${role}/${action}${query}`, {
       method: c.req.method, headers, body: c.req.method === 'POST' ? await c.req.text() : undefined,
     })
-    if (role === 'user' && action === 'checkout' && response.ok) {
-      const settings = stripeSettings(c.env)
-      if (!settings) return c.json({ error: 'checkout_disabled' }, 503)
+    if (settings && response.ok) {
       try {
         const url = await startCheckout(settings, await response.json<CreditOrder>())
         if (url) return c.json({ url }, 200, { 'Cache-Control': 'no-store' })
