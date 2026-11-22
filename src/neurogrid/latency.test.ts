@@ -4,7 +4,7 @@ import { firstWorker, issueProbe, recordProbe, type WorkerLatency } from './late
 describe('worker routing by latency', () => {
   const now = 100_000
   const node = (id: string, assigned: number, ms?: number, at = now) => ({
-    id, assigned, latency: ms === undefined ? undefined : { ms, at },
+    id, assigned, seen: now, latency: ms === undefined ? undefined : { ms, at },
   })
 
   it('prefers a materially faster path even when it was assigned more recently', () => {
@@ -28,6 +28,12 @@ describe('worker routing by latency', () => {
     const known = node('known', 98_000, 90)
     expect(firstWorker([stale, known, legacy], now)).toBe(known)
     expect(firstWorker([legacy, stale], now)).toBe(stale)
+  })
+
+  it('lets a slower worker claim a stage when the fastest worker has stopped polling', () => {
+    const silent = { ...node('silent', 75_000, 5), seen: now - 8_000 }
+    const polling = node('polling', 98_000, 90)
+    expect(firstWorker([silent, polling], now)).toBe(polling)
   })
 
   it('measures a keyed round trip once, smooths new samples and limits probe frequency', () => {

@@ -1,9 +1,26 @@
 import { createHmac } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import { startCheckout, stripeOutcome, verifyStripeSignature } from './payments'
+import type { Env } from '../../worker'
+import { startCheckout, stripeOutcome, stripeSettings, verifyStripeSignature } from './payments'
 import { purchaseCents } from './protocol'
 
 const id = '1e27e7d5-659d-4c6b-9f6e-c6c61f657bc0'
+
+it('enables live checkout only on its configured HTTPS origin', () => {
+  const origin = 'https://neurogrid.app.space'
+  const local = 'http://localhost:5173'
+  const settings = {
+    NEUROGRID_STRIPE_KEY: 'rk_live_fixture',
+    NEUROGRID_STRIPE_WEBHOOK: 'whsec_fixture',
+    NEUROGRID_STRIPE_ORIGIN: origin,
+  } as Env
+  expect(stripeSettings(settings, origin)?.live).toBe(true)
+  expect(stripeSettings(settings, local)).toBeUndefined()
+  expect(stripeSettings({ ...settings, NEUROGRID_STRIPE_ORIGIN: local }, local)).toBeUndefined()
+  expect(stripeSettings({
+    ...settings, NEUROGRID_STRIPE_KEY: 'rk_test_fixture', NEUROGRID_STRIPE_ORIGIN: local,
+  }, local)?.live).toBe(false)
+})
 
 it('prices whole-credit orders at one cent per credit, with a one-dollar minimum', () => {
   expect(purchaseCents(100)).toBe(100)
@@ -35,6 +52,7 @@ describe('Stripe webhook verification', () => {
   })
 
   it('fulfills only a paid Checkout Session in the configured mode', () => {
+    expect(stripeOutcome('{', false)).toBeUndefined()
     const paid = event('checkout.session.completed', 'complete', 'paid')
     expect(stripeOutcome(paid, false)).toEqual({
       id, cents: 500, live: false, sessionId: 'cs_test_example', status: 'paid',

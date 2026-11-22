@@ -42,6 +42,7 @@ async function request<T>(path: string, data?: object): Promise<T> {
   }
   const response = await fetch('/api/grid/' + path, {
     method: data ? 'POST' : 'GET', headers, body: data ? JSON.stringify(data) : undefined,
+    signal: AbortSignal.timeout(15_000),
   })
   const result = await response.json()
   if (!response.ok) throw new Error(result && typeof result === 'object' && 'error' in result

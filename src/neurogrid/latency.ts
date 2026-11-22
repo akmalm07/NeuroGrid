@@ -2,6 +2,7 @@ const PROBE_INTERVAL_MS = 15_000
 const MAX_PROBE_MS = 2_000
 const SAMPLE_TTL_MS = 60_000
 const TIE_MS = 25
+const ASSIGNMENT_FRESH_MS = 8_000
 
 interface PingProbe { id?: string; sentAt: number }
 interface LatencySample { ms: number; at: number }
@@ -33,8 +34,12 @@ export function recordProbe(node: WorkerLatency, id: unknown, now: number): numb
   return Math.round(node.latency.ms)
 }
 
-export function firstWorker<T extends WorkerLatency & { id: string; assigned: number }>(eligible: T[], now: number): T | undefined {
-  const best = Math.min(...eligible.map((node) => freshLatency(node, now)))
-  return eligible.filter((node) => freshLatency(node, now) <= best + TIE_MS)
+export function firstWorker<T extends WorkerLatency & { id: string; assigned: number; seen: number }>(
+  eligible: T[], now: number,
+): T | undefined {
+  // A silent worker must stop blocking assignments before the stage times out.
+  const polling = eligible.filter((node) => node.seen + ASSIGNMENT_FRESH_MS > now)
+  const best = Math.min(...polling.map((node) => freshLatency(node, now)))
+  return polling.filter((node) => freshLatency(node, now) <= best + TIE_MS)
     .sort((a, b) => a.assigned - b.assigned || a.id.localeCompare(b.id))[0]
 }

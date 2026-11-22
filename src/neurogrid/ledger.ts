@@ -1,7 +1,10 @@
-import { SUPPLY, blockBytes, type Block, type BlockKind } from './protocol'
+import { GRANT, SUPPLY, blockBytes, type Block, type BlockKind } from './protocol'
 
 export const EMPTY_HASH = '0'.repeat(64)
 export const TREASURY = 'treasury'
+const KINDS: BlockKind[] = ['genesis', 'grant', 'reserve', 'settle', 'refund',
+  'checkout', 'purchase', 'checkout_release']
+const encoder = new TextEncoder()
 
 export async function verifyChain(blocks: Block[]): Promise<{ height: number; head: string }> {
   let previous = EMPTY_HASH
@@ -12,13 +15,11 @@ export async function verifyChain(blocks: Block[]): Promise<{ height: number; he
   const seen = new Set<string>()
   for (const [height, block] of blocks.entries()) {
     const invalid = () => new Error(`Invalid ledger at block ${height}`)
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(blockBytes(block)))
+    const digest = await crypto.subtle.digest('SHA-256', encoder.encode(blockBytes(block)))
     const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
-    const kinds: BlockKind[] = ['genesis', 'grant', 'reserve', 'settle', 'refund',
-      'checkout', 'purchase', 'checkout_release']
     const key = `${block.kind}/${block.reference}`
     if (block.version !== 1 || block.height !== height || block.previousHash !== previous
-        || hash !== block.hash || !kinds.includes(block.kind) || seen.has(key)) throw invalid()
+        || hash !== block.hash || !KINDS.includes(block.kind) || seen.has(key)) throw invalid()
     seen.add(key)
     const transfers = new Map(block.transfers)
     if (transfers.size !== block.transfers.length) throw invalid()
@@ -48,8 +49,8 @@ export async function verifyChain(blocks: Block[]): Promise<{ height: number; he
       checkouts.delete(block.reference)
     }
     if (block.kind === 'grant') {
-      const grant = transfers.get(block.reference) ?? 0
-      if (grant <= 0 || transfers.get(TREASURY) !== -grant || transfers.size !== 2) throw invalid()
+      if (!block.reference.startsWith('acct:') || transfers.get(block.reference) !== GRANT
+          || transfers.get(TREASURY) !== -GRANT || transfers.size !== 2) throw invalid()
     }
     if (block.kind === 'reserve') {
       const amount = transfers.get(escrow) ?? 0
@@ -61,7 +62,9 @@ export async function verifyChain(blocks: Block[]): Promise<{ height: number; he
       const held = reservations.get(block.reference)
       if (!held || transfers.get(escrow) !== -held.amount) throw invalid()
       if (block.kind === 'refund' && (transfers.size !== 2 || transfers.get(held.account) !== held.amount)) throw invalid()
-      if (block.kind === 'settle' && (!/^[\da-f]{64}$/.test(block.proof) || transfers.get(TREASURY) !== 1)) throw invalid()
+      if (block.kind === 'settle' && (!/^[\da-f]{64}$/.test(block.proof) || transfers.get(TREASURY) !== 1
+          || block.transfers.some(([name, delta]) =>
+            name !== escrow && name !== TREASURY && (!name.startsWith('acct:') || delta <= 0)))) throw invalid()
       reservations.delete(block.reference)
     }
     for (const [name, delta] of block.transfers) {

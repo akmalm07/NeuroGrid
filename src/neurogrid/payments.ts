@@ -12,12 +12,15 @@ export interface CreditOrder extends CreditPack {
   status: 'pending' | 'paid' | 'released'
 }
 
-export function stripeSettings(env: Env) {
+export function stripeSettings(env: Env, requestOrigin: string) {
   const { NEUROGRID_STRIPE_KEY: key, NEUROGRID_STRIPE_WEBHOOK: secret,
     NEUROGRID_STRIPE_ORIGIN: origin } = env
   if (!key || !/^(sk|rk)_(test|live)_[A-Za-z0-9]+$/.test(key)
-      || !secret?.startsWith('whsec_') || !origin || !/^https:\/\/[a-z0-9.-]+$/.test(origin)) return
-  return { key, secret, origin, live: key.includes('_live_') }
+      || !secret?.startsWith('whsec_') || !origin || origin !== requestOrigin) return
+  const live = key.includes('_live_')
+  const secureOrigin = /^https:\/\/[a-z0-9.-]+$/.test(origin)
+  const localTestOrigin = !live && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+  if (secureOrigin || localTestOrigin) return { key, secret, origin, live }
 }
 
 export async function startCheckout(settings: NonNullable<ReturnType<typeof stripeSettings>>, order: CreditOrder) {
@@ -57,7 +60,12 @@ export function verifyStripeSignature(payload: string, header: string, secret: s
 }
 
 export function stripeOutcome(payload: string, live: boolean) {
-  const event = JSON.parse(payload)
+  let event
+  try {
+    event = JSON.parse(payload)
+  } catch {
+    return
+  }
   if (event?.livemode !== live) return
   const session = event.data?.object
   const id = session?.metadata?.neurogrid_order

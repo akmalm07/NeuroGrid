@@ -44,6 +44,13 @@ describe('ledger replay', () => {
     await expect(verifyChain([genesis, grant, overspend])).rejects.toThrow('block 2')
   })
 
+  it('rejects a balanced settlement that debits an account outside escrow', async () => {
+    const extraDebit = seal(reserve, 'settle', 'job-id', [
+      ['held:job-id', -7], ['treasury', 1], ['acct:requester', -5], ['acct:worker', 11],
+    ])
+    await expect(verifyChain([genesis, grant, reserve, extraDebit])).rejects.toThrow('block 3')
+  })
+
   it('moves reserved checkout credits to the buyer once, preserving supply', async () => {
     const checkout = seal(grant, 'checkout', 'order', [['treasury', -500], ['checkout:order', 500]])
     const purchase = seal(checkout, 'purchase', 'order', [['checkout:order', -500], ['acct:buyer', 500]])

@@ -18,7 +18,7 @@ export function registerNeuroGrid(app: Hono<AppContext>) {
     onError: (c) => c.json({ error: 'body_too_large' }, 413),
   }))
   app.get('/api/grid/public/checkout', (c) => {
-    const settings = stripeSettings(c.env)
+    const settings = stripeSettings(c.env, new URL(c.req.url).origin)
     return c.json({ mode: settings ? (settings.live ? 'live' : 'test') : 'disabled' }, 200,
       { 'Cache-Control': 'no-store' })
   })
@@ -27,7 +27,7 @@ export function registerNeuroGrid(app: Hono<AppContext>) {
     if (!auth) return c.json({ error: 'unauthorized' }, 401)
     const data = await c.req.json<{ credits?: unknown }>().catch(() => undefined)
     if (purchaseCents(data?.credits) === undefined) return c.json({ error: 'invalid_credit_amount' }, 400)
-    const settings = stripeSettings(c.env)
+    const settings = stripeSettings(c.env, new URL(c.req.url).origin)
     if (!settings) return c.json({ error: 'checkout_disabled' }, 503)
     const response = await c.env.NEUROGRID.getByName('main').fetch('https://neurogrid.internal/payments/reserve', {
       method: 'POST',
@@ -46,7 +46,7 @@ export function registerNeuroGrid(app: Hono<AppContext>) {
     return c.json({ error: 'checkout_pending' }, 503)
   })
   app.post('/api/grid/stripe/webhook', async (c) => {
-    const settings = stripeSettings(c.env)
+    const settings = stripeSettings(c.env, new URL(c.req.url).origin)
     if (!settings) return c.notFound()
     const payload = await c.req.text()
     const signature = c.req.header('Stripe-Signature') ?? ''
