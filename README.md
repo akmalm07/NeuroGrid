@@ -2,7 +2,14 @@
 
 NeuroGrid runs **SmolLM2-135M-Instruct** across three volunteer CPU nodes. Each node hosts ten transformer layers. A trusted reference recomputes each partition result, and a successful request pays the workers from the requester's compute credits. The web app shows the current network, your balance, and a verifiable history of credit movement.
 
-[Live website](https://neurogrid.app.space) · [Demo video](https://github.com/akmalm07/NeuroGrid/releases/download/v0.1.5/neurogrid-demo.mp4) · [Desktop downloads](https://github.com/akmalm07/NeuroGrid/releases) · [Architecture](architecture.md)
+[Live website](https://neurogrid.app.space) · [Desktop downloads](https://github.com/akmalm07/NeuroGrid/releases) · [Architecture](architecture.md)
+
+
+## Basic demo
+
+try it yourself at [neurogrid](https://neurogrid.app.space/chat)
+
+https://github.com/user-attachments/assets/633ec471-fd90-484e-ab1e-4d0fed958902
 
 ## Try the website
 
