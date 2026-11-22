@@ -16,6 +16,8 @@ NeuroGrid runs **SmolLM2-135M-Instruct** across three volunteer CPU nodes. Each 
 
 Chat handles one request at a time. It has a 128-token total context and generates up to 24 tokens per request. Each prompt starts a fresh context. The small model can give incomplete or inaccurate answers. Use prompts you are comfortable sharing with volunteer workers.
 
+**Generation can be slow on the current minimum setup.** The three model partitions run sequentially for every generated token, and the trusted verifier recomputes them. When the workers and verifier share a low-powered computer, they compete for the same CPU and memory, so replies may take noticeably longer. This is a resource limit of the small, single-machine demo setup, not a hosted GPU service. Adding capable worker machines or running the roles on separate computers can reduce contention; latency still depends on their CPU and network connection.
+
 ## Run a compute node
 
 Download and extract the installer for Windows 10/11 x86-64 or Linux x86-64 (Ubuntu 24.04 was tested). Install Python 3.12, with the Python Launcher on Windows or the distribution's Python 3.12 venv package on Linux. Allow 4 GB of RAM and 4 GB of disk space. The package uses pinned CPU PyTorch and Transformers versions and downloads the model on first use.
