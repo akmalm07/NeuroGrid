@@ -2,6 +2,69 @@
 
 DeepSpace hosts the trusted control plane. Three volunteer PyTorch processes form the CPU inference pipeline. A fourth CPU process, controlled by the operator, independently verifies the outputs. The public website reads network projections and the credit ledger.
 
+## Technology stack
+
+| Area | Technology | Role |
+| --- | --- | --- |
+| Website | React 19, TypeScript, Tailwind CSS 4, Vite | Responsive pages for chat, network status, ledger, and node downloads |
+| HTTP API | Hono on the DeepSpace Worker runtime | Authenticated app routes, coordinator API, and optional Stripe webhook |
+| Platform services | DeepSpace SDK 0.44.2 | App hosting, authentication, Worker runtime, Durable Object bindings, and RecordRoom sync |
+| Coordination and persistence | SQLite-backed Cloudflare Durable Object | Authoritative node registry, leases, jobs, balances, reservations, and ledger blocks |
+| Inference clients | Python 3.12, PyTorch 2.7.1 CPU, Hugging Face Transformers 4.52.4 | Three partition workers and the trusted reference verifier |
+| Desktop client | PySide6 6.9.1 | Optional desktop controls, tray integration, and resource settings for a node |
+| Model | SmolLM2-135M-Instruct, pinned Hugging Face checkpoint | The same immutable model weights are used by workers and reference verifier |
+| Credit integrity | SHA-256 hash-linked records in SQLite | Tamper-evident history under a trusted coordinator; not decentralized consensus |
+| Optional payments | Stripe Checkout and signed webhooks | Moves existing treasury credits to a buyer after confirmed payment |
+
+## Architecture diagram
+
+```mermaid
+flowchart LR
+    User[User]
+    Browser[React + TypeScript website<br/>Vite, Tailwind CSS]
+    Auth[DeepSpace authentication]
+    Worker[DeepSpace Worker<br/>Hono routes]
+    Sync[DeepSpace RecordRoom<br/>revision notifications]
+    Coordinator[(SQLite-backed<br/>Coordinator Durable Object)]
+    W1[Python CPU worker<br/>Embeddings + layers 1–10]
+    W2[Python CPU worker<br/>Layers 11–20]
+    W3[Python CPU worker<br/>Layers 21–30 + output]
+    Verifier[Trusted Python verifier<br/>reference recomputation]
+    Model[(Pinned Hugging Face<br/>model snapshot)]
+    Stripe[Stripe Checkout<br/>optional]
+
+    User --> Browser
+    Browser <--> Auth
+    Browser -->|chat, node and ledger API| Worker
+    Worker --> Coordinator
+    Coordinator -->|leases and activations| W1
+    W1 -->|verified stage input| Coordinator
+    Coordinator --> W2
+    W2 -->|verified stage input| Coordinator
+    Coordinator --> W3
+    W3 -->|candidate activation and token| Coordinator
+    Coordinator <--> Verifier
+    W1 -. load assigned weights .-> Model
+    W2 -. load assigned weights .-> Model
+    W3 -. load assigned weights .-> Model
+    Verifier -. load reference weights .-> Model
+    Coordinator -->|balances, jobs, blocks| Worker
+    Worker -->|live revision signal| Sync
+    Sync -. notify and refresh snapshot .-> Browser
+    Browser -->|credit purchase| Worker
+    Worker <--> Stripe
+```
+
+### Component responsibilities
+
+- **Website:** The browser presents the five product pages and sends authenticated chat, node-management, and ledger requests. It displays live status from coordinator snapshots; it does not decide worker identities, verify results, or write balances.
+- **DeepSpace authentication and Worker:** DeepSpace authenticates users and hosts the application. The Hono routes validate the user's identity, enforce API boundaries, and forward authoritative work to the coordinator. Stripe is only involved when credit checkout is configured.
+- **Coordinator Durable Object:** This is the trusted center of the MVP. Its SQLite transaction scope serializes jobs and keeps credit changes, reservations, and corresponding ledger blocks consistent. It chooses workers, issues leases, applies timeouts and failover, validates verifier results, and emits read-only revision updates.
+- **Three Python workers:** Each separately installed CLI or desktop node polls for work and runs only its assigned model partition on CPU. The stages are sequential, so one token passes through all three workers before the next token can be selected.
+- **Reference verifier:** An operator-managed Python process runs the same pinned checkpoint and independently recomputes each stage. It checks numerical agreement and the final greedy token before the coordinator accepts the stage. This is trusted reference checking, not proof that a particular physical machine did the work.
+- **Model snapshot:** Workers and verifier fetch the same pinned Hugging Face files. Each process loads its assigned layer weights; the reference process has the weights needed to recompute all partitions.
+- **RecordRoom and ledger:** RecordRoom carries revision signals so the browser knows to refresh authoritative state. The coordinator stores balances and SHA-256 linked blocks in SQLite. Hashes expose a changed history relative to a known chain head; they do not provide consensus or prevent the trusted coordinator from rewriting the whole chain.
+
 ## Inference
 
 The checkpoint is Hugging Face's SmolLM2-135M-Instruct, revision `12fd25f77366fa6b3b4b768ec3050bf629380bac`, licensed Apache 2.0.
