@@ -15,6 +15,21 @@ Check **Launch and resume when I sign in** to enable automatic startup. Clear it
 
 ## Run without a desktop
 
+### Keep all three partitions and the verifier online on one Linux host
+
+Use Ubuntu 24.04 or another x86-64 Linux host with systemd, Python 3.12, venv, and curl. On the hosted [Downloads page](https://neurogrid.app.space/downloads), sign in and create one distinct key for each of **Input**, **Transform**, and **Output**. Have the operator's `NEUROGRID_VERIFIER_SECRET` ready from the production DeepSpace secrets config.
+
+Run `sudo bash packaging/linux/install-neurogrid-host.sh` from a source checkout. The script downloads and verifies the v0.1.5 Linux archive, validates which partition each node key belongs to, and prompts for credentials without echoing them. It starts four systemd services with one CPU thread each and enables startup at boot. The processes share a local model cache. Rerunning the script reuses the saved keys. Other machines can join with their own node keys.
+
+```sh
+sudo systemctl status neurogrid-worker-{1,2,3}.service neurogrid-reference.service --no-pager
+sudo journalctl -u 'neurogrid-*.service' -f
+```
+
+Wait for [Network](https://neurogrid.app.space/network) to show all three partitions and the verifier online, then submit a short prompt. Node keys expire after 30 days. To rotate one, rename its root-owned file in `/etc/neurogrid`, rerun the script with a new key for the same partition, and restart that service.
+
+### Run a single headless node
+
 The headless installer skips Qt and desktop registration. Create a node key on the website's **Downloads** page. From the extracted folder, run the commands for your system.
 
 Windows PowerShell
