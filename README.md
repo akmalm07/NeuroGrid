@@ -157,11 +157,13 @@ In Bash, export the same variables with your local credential path. The two-acco
 
 ### MVP audit results
 
+- The build, TypeScript checks, lint, 19 Vitest tests, and three Python tests passed. npm's audit reported zero known advisories for the resolved dependencies.
 - Windows local CPU inference matched **24 of 24 greedy tokens** across three prompts against the full model. The verifier rejected an invalid activation.
-- The local integration used two authenticated accounts, three Python worker processes, and one verifier on the same Windows host. A disconnected worker's lease was replaced, and four generated tokens settled exactly once. A malformed result was rejected and refunded exactly once.
-- The local browser suite exercised the five public pages, real DeepSpace WebSocket frames, separate account permissions, the credit quote, a real prompt, persisted chat history, sign-out, and ledger replay. The demo records the actual response **The capital of France is Paris.**
+- The local integration used two authenticated accounts, three Python worker processes, and one verifier on the same Windows host. A disconnected worker's lease was replaced, and four generated tokens settled exactly once in **20.3 seconds**. A malformed result was rejected and refunded exactly once in **15.0 seconds**.
+- All **13 local browser checks** passed, including real DeepSpace WebSocket frames, separate account permissions, the credit quote, a real prompt, persisted chat history, sign-out, and ledger replay. The signed-in prompt and reload check took **12.6 seconds**. The demo records the actual response **The capital of France is Paris.**
+- The deployed app passed **11 browser smoke checks** covering the public pages, live WebSocket frames, ledger verification, and the guest API boundary. The two signed-in scenarios ran against the local stack.
 - Isolated Stripe Worker and SQLite checks accepted a signed simulated $2.53 payment once, even after event replay. An order below $1 was rejected. The production key is disabled on loopback. No real card was charged during this audit.
-- The release workflow covers Windows and Linux headless installation, menu registration, GUI launch, and CPU shard execution. [Release workflow](https://github.com/akmalm07/NeuroGrid/actions/workflows/node-release.yml)
+- Both v0.1.5 release jobs passed headless installation, menu registration, GUI launch, and CPU shard execution. The published Windows and Linux archive checksums matched on the audit computer. [Release workflow run](https://github.com/akmalm07/NeuroGrid/actions/runs/44971170678)
 
 ## Deploy and operate
 
