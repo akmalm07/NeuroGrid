@@ -32,12 +32,12 @@ export default function Home() {
         </div></div>
         <div><Layers3 size={20} /><div><strong>30</strong><span>Transformer layers</span></div></div>
         <div><Activity size={20} /><div><strong>{result?.settled ?? '—'}</strong><span>Verified requests</span></div></div>
-        <div><Coins size={20} /><div><strong>100,000</strong><span>Simulated credit supply</span></div></div>
+        <div><Coins size={20} /><div><strong>2 credits</strong><span>Quick reply</span></div></div>
       </div>
     </section>
     <section className="grid-container home-section">
       <div className="section-heading">
-        <div><h2>Follow the signal</h2><p>Three partitions run {MODEL}, ten layers at a time.</p></div>
+        <div><h2>Follow the signal</h2><p>Four partitions run {MODEL}, ten layers at a time.</p></div>
         <Link className="text-link" to="/network">View the network <ArrowRight size={17} /></Link>
       </div>
       <Coverage network={result} />

@@ -4,11 +4,12 @@ import { Button } from '@/components/ui/Button'
 import { explain, readLedger } from '../../neurogrid/api'
 import { verifyChain } from '../../neurogrid/ledger'
 import { useGridRevision, useNetwork } from '../../neurogrid/live'
-import { SUPPLY, type Block } from '../../neurogrid/protocol'
+import { UNIT, type Block } from '../../neurogrid/protocol'
 import { PageHeading } from '../../neurogrid/ui'
 
 const eventName = { genesis: 'Genesis', grant: 'Account grant', reserve: 'Inference reservation', settle: 'Verified settlement',
-  refund: 'Refund', checkout: 'Checkout reservation', purchase: 'Credit purchase', checkout_release: 'Checkout released' }
+  refund: 'Refund', checkout: 'Checkout opened', purchase: 'Credit purchase', checkout_release: 'Checkout released',
+  units: 'Credit unit migration', purchase_adjustment: 'Payment adjustment' }
 
 export default function Ledger() {
   const { result } = useNetwork(useGridRevision())
@@ -49,11 +50,13 @@ export default function Ledger() {
   }
 
   const head = blocks?.at(-1)
+  const supply = blocks?.reduce((sum, block) =>
+    sum + block.transfers.reduce((total, [, delta]) => total + delta, 0) / (block.version === 2 ? UNIT : 1), 0)
   return <div className="grid-container page-body">
     <PageHeading title="Ledger">Follow credits from the treasury to a request, then to its workers or back to the requester.</PageHeading>
     <section className="surface ledger-summary">
       <div><h2>Chain head</h2><code>{head?.hash ?? '—'}</code></div>
-      <div><h2>Total supply</h2><strong>{SUPPLY.toLocaleString()} credits</strong></div>
+      <div><h2>Outstanding supply</h2><strong>{supply?.toLocaleString(undefined, { maximumFractionDigits: 3 }) ?? '—'} credits</strong></div>
       <div className="ledger-actions">
         <Button className="grid-action" disabled={!blocks || validating} onClick={() => void verify()}><ShieldCheck size={17} />Verify ledger</Button>
         <Button variant="outline" disabled={!blocks} onClick={save}><Download size={17} />Export JSON</Button>
@@ -72,7 +75,7 @@ export default function Ledger() {
             <dt>Hash</dt><dd>{block.hash}</dd>
             <dt>Previous hash</dt><dd>{block.previousHash}</dd>
             <dt>Reference</dt><dd>{block.reference}</dd>
-            {block.proof && <><dt>Receipt digest</dt><dd>{block.proof}</dd></>}
+            {block.proof && <><dt>Evidence digest</dt><dd>{block.proof}</dd></>}
           </dl>
           <ul className="transfers">{block.transfers.map(([id, delta]) => <li key={id}><code>{id}</code>
             <span className={delta > 0 ? 'verification-ok' : ''}>{delta > 0 ? '+' : ''}{delta.toLocaleString()}</span></li>)}</ul>

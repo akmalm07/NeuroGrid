@@ -8,10 +8,13 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from neurogrid_node import SHARD_COUNT
 from neurogrid_node.client import GridClient, GridError
+from neurogrid_node.profile import ProfileStore
 
 
 def call(base, path, *, data=None, token=None, cookie=None):
@@ -53,127 +56,170 @@ def wait_until(check, label, timeout=60):
     raise AssertionError(f"Timed out waiting for {label}")
 
 
+def stop_child(process):
+    if process.poll() is None:
+        if os.name == "nt":
+            subprocess.run(["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        else:
+            process.terminate()
+        process.wait(timeout=15)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True)
     parser.add_argument("--accounts", type=Path, required=True)
     parser.add_argument("--model", type=Path, required=True)
-    parser.add_argument("--keep-online", action="store_true", help="Keep the three workers and verifier running after checks")
+    parser.add_argument("--threads", type=int, default=2)
+    parser.add_argument("--failover", action="store_true")
+    parser.add_argument("--context-only", action="store_true", help="Check a follow-up after the saved Kyoto turn")
+    parser.add_argument("--extended", action="store_true", help="Also test longer output and additional chat turns")
+    parser.add_argument("--keep-online", action="store_true")
     args = parser.parse_args()
     origin = args.url.rstrip("/")
-    requester, worker = (auth(origin, item) for item in json.loads(args.accounts.read_text(encoding="utf-8-sig")))
+    requester, contributor = (auth(origin, item) for item in json.loads(args.accounts.read_text(encoding="utf-8-sig")))
     reference_key = os.environ["NEUROGRID_SECRET"].strip()
     children = []
-    keys = []
+    nodes = []
+    profiles = TemporaryDirectory()
 
     def account(token):
         status, data, _ = call(origin, "/api/grid/user/account", token=token)
         assert status == 200, f"Could not read account ({status})"
         return data
 
-    def run_agent(role, key):
-        env = {**os.environ, "NEUROGRID_SECRET": key, "PYTHONUNBUFFERED": "1"}
-        process = subprocess.Popen([sys.executable, "-m", "neurogrid_node.client", role,
-                                    "--url", origin, "--model", str(args.model.resolve())], env=env)
-        children.append(process)
-        return process
-
     def enroll(shard):
-        status, node, _ = call(origin, "/api/grid/user/enroll", token=worker, data={"shard": shard})
-        assert status == 200, f"Enroll failed: {node}"
-        keys.append(node)
+        status, node, _ = call(origin, "/api/grid/user/enroll", token=contributor, data={"shard": shard})
+        assert status == 200, f"Enroll failed ({status})"
+        nodes.append(node)
         return node
+
+    def launch(role, secret, shard=None):
+        env = {**os.environ, "NEUROGRID_SECRET": secret, "PYTHONUNBUFFERED": "1"}
+        command = [sys.executable, "-m", "neurogrid_node.client", role, "--model", str(args.model.resolve())]
+        store = None
+        if shard is None:
+            command += ["--url", origin, "--threads", str(args.threads)]
+        else:
+            store = ProfileStore(Path(profiles.name) / f"node-{len(children)}.json")
+            store.update({"site": origin, "threads": args.threads, "duty": 70})
+            command += ["--profile", str(store.path)]
+        child = subprocess.Popen(command, env=env)
+        children.append(child)
+        return child, store
 
     def network():
         return call(origin, "/api/grid/public/network")[1]
 
-    def start():
-        request = {"prompt": "What is 2 + 2?", "maxTokens": 4, "key": str(uuid.uuid4())}
-        status, job, _ = call(origin, "/api/grid/user/request", data=request, token=requester)
-        assert status == 200, job
-        return job["id"], request
-
-    def job_state(job_id, state):
-        return next((job for job in account(requester)["jobs"] if job["id"] == job_id and job["status"] == state), None)
-
     def ready():
-        status = network()
-        return status["verifier"] and {node["shard"] for node in status["nodes"]
-                                       if node["status"] in ["online", "working"]} == {0, 1, 2}
+        if any(child.poll() is not None for child in children):
+            raise RuntimeError(f"A Granite process exited during startup ({[child.poll() for child in children]})")
+        grid = network()
+        return grid["verifier"] and {node["shard"] for node in grid["nodes"]
+                                    if node["status"] in {"online", "working"}} == set(range(SHARD_COUNT))
 
-    def stop(process):
-        if process.poll() is None:
-            process.terminate()
-            process.wait(timeout=12)
+    def start(prompt, *, expected_profile="quick"):
+        key = str(uuid.uuid4())
+
+        def quote_ready():
+            status, quote, _ = call(origin, "/api/grid/user/quote", token=requester, data={"prompt": prompt, "key": key})
+            assert status == 200, quote
+            assert quote["status"] != "rejected", quote
+            return quote if quote["status"] == "ready" else None
+
+        quote = wait_until(quote_ready, "token-counted quote")
+        assert quote["profile"] == expected_profile
+        packet = {"quoteId": quote["id"], "key": key}
+        other, _, _ = call(origin, "/api/grid/user/request", token=contributor, data=packet)
+        assert other == 409, "A second account used the quote"
+        status, job, _ = call(origin, "/api/grid/user/request", token=requester, data=packet)
+        assert status == 200, job
+        return job["id"], packet, quote["credits"]
+
+    def finish(job_id, packet, original, price, *, expected=None):
+        def terminal():
+            return next((job for job in account(requester)["jobs"]
+                         if job["id"] == job_id and job["status"] in {"settled", "refunded"}), None)
+
+        job = wait_until(terminal, "Granite reply", timeout=540)
+        assert job["status"] == "settled", job
+        if price == 2:
+            assert job["charge"] == 2, job
+        if expected:
+            assert expected.lower() in job["output"].lower(), job
+        assert job["charge"] + job["returned"] == price
+        assert account(requester)["credits"] == original - job["charge"]
+        duplicate_status, duplicate, _ = call(origin, "/api/grid/user/request", token=requester, data=packet)
+        assert duplicate_status == 200 and duplicate["id"] == job_id
+        assert account(requester)["credits"] == original - job["charge"]
+        blocks = call(origin, "/api/grid/public/ledger")[1]["blocks"]
+        if len(blocks) < 100:
+            assert sum(block["reference"] == job_id and block["kind"] == "settle" for block in blocks) == 1
+        return job
 
     try:
         assert call(origin, "/api/grid/user/account")[0] == 401
-        initial_requester, initial_worker = account(requester)["credits"], account(worker)["credits"]
-        assert initial_requester >= 39, "The test requester needs at least 39 credits"
-        reference = run_agent("reference", reference_key)
-        left, middle, right = (enroll(shard) for shard in range(3))
-        node_b, node_c = (run_agent("node", node["secret"]) for node in (middle, right))
-        dormant = GridClient(origin, left["secret"])
-        dormant.call("claim", {})
-        wait_until(ready, "three partitions and verifier")
-        assert call(origin, "/api/grid/user/revoke", token=requester, data={"id": left["id"]})[0] == 404
-        print("PASS · authentication and node ownership", flush=True)
+        launch("reference", reference_key)
+        workers = [(node, *launch("node", node["secret"], node["shard"]))
+                   for node in (enroll(shard) for shard in range(SHARD_COUNT))]
+        wait_until(ready, "four Granite partitions and verifier", timeout=180)
+        for node, process, store in workers:
+            wait_until(lambda: (status := store.worker_status()[1]) and status.last_heartbeat,
+                       "the installed profile's heartbeat")
+            running, status = store.worker_status()
+            assert running and status and status.last_heartbeat and process.poll() is None
+            assert (status.threads, status.duty, status.shard) == (args.threads, 70, node["shard"])
+        if not args.context_only:
+            start_time = time.monotonic()
+            before = account(requester)["credits"]
+            job, packet, price = start("What is the capital of France?")
+            if args.failover:
+                first, process, _ = workers[0]
+                wait_until(lambda: any(n["id"] == first["id"] and n["status"] == "working" for n in network()["nodes"]),
+                           "first Granite partition lease")
+                stop_child(process)
+                backup = enroll(first["shard"])
+                standby, standby_store = launch("node", backup["secret"], backup["shard"])
+                workers[0] = (backup, standby, standby_store)
+                GridClient(origin, first["secret"]).call("pause", {})
+            france = finish(job, packet, before, price, expected="Paris")
+            print(f"PASS real Granite France answer {france['output']!r}, 2 credits once "
+                  f"({time.monotonic() - start_time:.1f}s)", flush=True)
 
-        # The first participant claims work and disappears without pausing.
-        failover_start = time.monotonic()
-        job_id, request = start()
-        duplicate_status, duplicate_job, _ = call(origin, "/api/grid/user/request", data=request, token=requester)
-        assert duplicate_status == 200 and duplicate_job["id"] == job_id
-        competing = {**request, "key": str(uuid.uuid4())}
-        assert call(origin, "/api/grid/user/request", data=competing, token=requester)[1]["error"] == "network_busy"
-        work = wait_until(lambda: dormant.call("claim", {}).get("work"), "first-stage lease")
-        backup = enroll(0)
-        node_a = run_agent("node", backup["secret"])
-        completed = wait_until(lambda: job_state(job_id, "settled"), "verified failover settlement")
-        assert completed["count"] == 4 and completed["charge"] == 13
-        assert account(requester)["credits"] == initial_requester - 13
-        assert account(worker)["credits"] == initial_worker + 12
-        try:
-            dormant.call("result", {"lease": work["lease"], "tensor": "bad"})
-            raise AssertionError("Stale lease accepted")
-        except GridError as error:
-            assert str(error) == "stale_lease"
-        repeated = call(origin, "/api/grid/user/request", data=request, token=requester)[1]
-        assert repeated["id"] == job_id and account(worker)["credits"] == initial_worker + 12
-        print(f"PASS · disconnected worker replaced, four tokens settled once in {time.monotonic() - failover_start:.1f}s; "
-              f"reply {completed['output']!r}", flush=True)
+            before = account(requester)["credits"]
+            job, packet, price = start("What is the capital of Paris?")
+            paris = finish(job, packet, before, price, expected="France")
+            assert "city" in paris["output"].lower(), paris
+            print(f"PASS real Granite Paris clarification {paris['output']!r}, 2 credits once", flush=True)
 
-        stop(node_a)
-        GridClient(origin, backup["secret"]).call("pause", {})
-        dormant.call("claim", {})
-        wait_until(ready, "capacity before refund test")
-        refund_start = time.monotonic()
-        refund_id, _ = start()
-        work = wait_until(lambda: dormant.call("claim", {}).get("work"), "lease to reject")
-        bad = dormant.call("result", {"lease": work["lease"], "tensor": "bad"})
-        assert bad == {"accepted": False, "reason": "malformed_result"}, bad
-        refunded = wait_until(lambda: job_state(refund_id, "refunded"), "deadline refund")
-        assert refunded["reason"] == "partition_unavailable"
-        assert account(requester)["credits"] == initial_requester - 13
-        assert account(worker)["credits"] == initial_worker + 12
-        blocks = call(origin, "/api/grid/public/ledger")[1]["blocks"]
-        assert sum(block["reference"] == job_id and block["kind"] == "settle" for block in blocks) == 1
-        assert sum(block["reference"] == refund_id and block["kind"] == "refund" for block in blocks) == 1
-        print(f"PASS · malformed activation rejected and credits refunded once in {time.monotonic() - refund_start:.1f}s", flush=True)
+            before = account(requester)["credits"]
+            job, packet, price = start("Remember that my chosen city is Kyoto. Confirm in one sentence.")
+            finish(job, packet, before, price)
+        before = account(requester)["credits"]
+        job, packet, price = start("Which city did I tell you to remember? Reply with the city only.")
+        remembered = finish(job, packet, before, price, expected="Kyoto")
+        print(f"PASS real Granite follow-up used saved context: {remembered['output']!r}", flush=True)
 
+        if args.extended:
+            before = account(requester)["credits"]
+            job, packet, price = start("In detail, explain why bees matter to food production in exactly thirty words.",
+                                       expected_profile="standard")
+            longer = finish(job, packet, before, price)
+            assert longer["count"] > 24, longer
+            print(f"PASS {longer['count']} generated tokens, charged {longer['charge']} within the Standard quote", flush=True)
         if args.keep_online:
-            dormant.call("pause", {})
-            node_a = run_agent("node", backup["secret"])
-            wait_until(ready, "demo capacity")
-            print("DEMO READY · 3 worker processes and the verifier on this host. Ctrl+C pauses them.", flush=True)
-            while all(process.poll() is None for process in (node_a, node_b, node_c, reference)):
-                time.sleep(5)
-            raise AssertionError("A demo process stopped")
+            print("DEMO READY · four Granite workers and reference verifier. Ctrl+C stops them.", flush=True)
+            while all(item[1].poll() is None for item in workers):
+                time.sleep(3)
     finally:
-        for process in children:
-            stop(process)
-        for key in keys:
-            call(origin, "/api/grid/user/revoke", token=worker, data={"id": key["id"]})
+        for child in children:
+            stop_child(child)
+        try:
+            for node in nodes:
+                call(origin, "/api/grid/user/revoke", token=contributor, data={"id": node["id"]})
+        finally:
+            profiles.cleanup()
 
 
 if __name__ == "__main__":

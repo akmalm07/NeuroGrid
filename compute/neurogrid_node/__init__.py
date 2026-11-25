@@ -1,3 +1,13 @@
 """NeuroGrid CPU inference and desktop volunteer client."""
 
-REVISION = "12fd25f77366fa6b3b4b768ec3050bf629380bac"
+import json
+from pathlib import Path
+
+MANIFEST = json.loads(Path(__file__).with_name("granite.json").read_text(encoding="utf-8"))
+MODEL = MANIFEST["model"]
+REVISION = MANIFEST["revision"]
+RUNTIME = MANIFEST["runtime"]
+SHARD_COUNT = MANIFEST["shards"]
+LAST_SHARD = SHARD_COUNT - 1
+CONTEXT = MANIFEST["context"]
+WINDOW = MANIFEST["window"]

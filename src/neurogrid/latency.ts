@@ -1,7 +1,6 @@
 const PROBE_INTERVAL_MS = 15_000
 const MAX_PROBE_MS = 2_000
 const SAMPLE_TTL_MS = 60_000
-const TIE_MS = 25
 const ASSIGNMENT_FRESH_MS = 8_000
 
 interface PingProbe { id?: string; sentAt: number }
@@ -10,6 +9,17 @@ interface LatencySample { ms: number; at: number }
 export interface WorkerLatency {
   probe?: PingProbe
   latency?: LatencySample
+  execution?: LatencySample
+  colo?: string
+  failures?: number
+}
+
+export interface RouteWorker extends WorkerLatency {
+  id: string
+  shard: number
+  seen: number
+  assigned: number
+  queued?: number
 }
 
 export function issueProbe(node: WorkerLatency, now: number): string | undefined {
@@ -34,12 +44,34 @@ export function recordProbe(node: WorkerLatency, id: unknown, now: number): numb
   return Math.round(node.latency.ms)
 }
 
-export function firstWorker<T extends WorkerLatency & { id: string; assigned: number; seen: number }>(
-  eligible: T[], now: number,
-): T | undefined {
-  // A silent worker must stop blocking assignments before the stage times out.
-  const polling = eligible.filter((node) => node.seen + ASSIGNMENT_FRESH_MS > now)
-  const best = Math.min(...polling.map((node) => freshLatency(node, now)))
-  return polling.filter((node) => freshLatency(node, now) <= best + TIE_MS)
-    .sort((a, b) => a.assigned - b.assigned || a.id.localeCompare(b.id))[0]
+export function latencyMs(node: WorkerLatency, now: number): number | undefined {
+  const value = freshLatency(node, now)
+  return Number.isFinite(value) ? Math.round(value) : undefined
+}
+
+export function recordExecution(node: WorkerLatency, elapsed: number, now: number) {
+  if (!Number.isFinite(elapsed) || elapsed < 0) return
+  const previous = node.execution
+  node.execution = { ms: previous && now - previous.at < SAMPLE_TTL_MS
+    ? (3 * previous.ms + elapsed) / 4 : elapsed, at: now }
+  node.failures = Math.max(0, (node.failures ?? 0) - 1)
+}
+
+export function routeWorker<T extends RouteWorker>(eligible: T[], now: number, ingress?: string): T | undefined {
+  const cost = (node: T) => {
+    const link = freshLatency(node, now)
+    const transit = Number.isFinite(link) ? link : 500
+    const execution = node.execution && now - node.execution.at < SAMPLE_TTL_MS ? node.execution.ms : 300
+    const region = ingress && node.colo === ingress ? 0 : 15
+    return transit + execution + region + (node.queued ?? 0) * 400 + (node.failures ?? 0) * 500
+      + (now - node.seen >= ASSIGNMENT_FRESH_MS ? 1_000 : 0)
+  }
+  return eligible.slice().sort((a, b) => cost(a) - cost(b) || a.assigned - b.assigned || a.id.localeCompare(b.id))[0]
+}
+
+export function selectRoute(workers: RouteWorker[], shards: number, now: number, ingress?: string): string[] | undefined {
+  // All serving links are relayed by the coordinator, so their route costs are additive.
+  const route = Array.from({ length: shards }, (_, shard) =>
+    routeWorker(workers.filter((node) => node.shard === shard), now, ingress)?.id)
+  return route.every((id): id is string => id !== undefined) ? route : undefined
 }

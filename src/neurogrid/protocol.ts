@@ -1,9 +1,15 @@
-export const MODEL = 'SmolLM2-135M-Instruct'
-export const REVISION = '12fd25f77366fa6b3b4b768ec3050bf629380bac'
-export const CONTEXT = 128
-export const MAX_TOKENS = 24
-export const WIDTH = 576
-export const VOCAB = 49152
+import granite from '../../compute/neurogrid_node/granite.json'
+
+export const MODEL = 'Granite 4.2 8B'
+export const { revision: REVISION, runtime: RUNTIME, width: WIDTH, vocab: VOCAB, context: CONTEXT,
+  window: WINDOW, shards: SHARD_COUNT } = granite
+export const LAST_SHARD = SHARD_COUNT - 1
+export const MAX_PROMPT_BYTES = 16_384
+export const QUICK_INPUT = 256
+export const QUICK_OUTPUT = 64
+export const MAX_TOKENS = 512
+export const RATE = 'granite-beta-1'
+export const UNIT = 1_000
 export const SUPPLY = 100_000
 export const GRANT = 100
 export const MIN_PURCHASE_CREDITS = 100
@@ -18,14 +24,15 @@ export const POLL_MS = 1_000
 export const SHARDS = [
   { title: 'Input', layers: '01–10', detail: 'Token embeddings and the first ten transformer layers' },
   { title: 'Transform', layers: '11–20', detail: 'Ten middle transformer layers' },
-  { title: 'Output', layers: '21–30', detail: 'Final layers, normalization and greedy token selection' },
+  { title: 'Transform II', layers: '21–30', detail: 'Ten middle transformer layers' },
+  { title: 'Output', layers: '31–40', detail: 'Final layers, normalization and greedy token selection' },
 ] as const
 
 export type Transfer = [account: string, delta: number]
 export type BlockKind = 'genesis' | 'grant' | 'reserve' | 'settle' | 'refund'
-  | 'checkout' | 'purchase' | 'checkout_release'
+  | 'checkout' | 'purchase' | 'checkout_release' | 'units' | 'purchase_adjustment'
 export interface BlockData {
-  version: 1
+  version: 1 | 2
   height: number
   previousHash: string
   createdAt: number
@@ -54,12 +61,17 @@ export interface JobSummary {
   maxTokens: number
   charge: number
   createdAt: number
+  returned?: number
+  trimmed?: number
+  model?: string
+  route?: string[]
 }
 
 export interface NodeSummary {
   id: string
   shard: number
   status: 'online' | 'working' | 'paused' | 'offline'
+  pingMs?: number
 }
 
 export interface NetworkSnapshot {
@@ -70,4 +82,19 @@ export interface NetworkSnapshot {
   active: { stage: number; status: JobSummary['status']; count: number } | null
 }
 
-export const fee = (tokens: number) => 1 + tokens * 3
+export type InferenceProfile = 'quick' | 'standard'
+
+export interface QuoteSummary {
+  id: string
+  status: 'preparing' | 'ready' | 'rejected'
+  expires: number
+  reason?: string
+  credits?: number
+  profile?: InferenceProfile
+  maxTokens?: number
+  trimmed?: number
+}
+
+export const fee = (input: number, generated: number) =>
+  2 + Math.ceil(Math.max(0, input - QUICK_INPUT) / QUICK_INPUT)
+    + Math.ceil(Math.max(0, generated - QUICK_OUTPUT) / 32)
