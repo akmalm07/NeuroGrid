@@ -1,6 +1,7 @@
 # NeuroGrid architecture
 
-**Implementation status as of November 24, 2026.** The repository's Granite candidate runs four BF16 CPU partitions with reference recomputation. The diagrams describe the target attested architecture. The [release test evidence](docs/granite-beta-results.md) and [handoff](docs/next-feature.md) track open gates. [Watch the animated architecture walkthrough](docs/neurogrid-next-architecture.mp4).
+**Implementation status as of November 24, 2026.** The repository's Granite candidate runs four BF16 CPU partitions with reference recomputation. The diagrams describe the target attested architecture. The [release test evidence](docs/granite-beta-results.md) and [handoff](docs/next-feature.md) track open gates.
+
 
 ## Target architecture
 
