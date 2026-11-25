@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION=v0.1.5
+VERSION=granite-beta
 SITE=https://neurogrid.app.space
 APP_DIR="/opt/neurogrid/$VERSION"
 CONFIG_DIR=/etc/neurogrid
 STATE_DIR=/var/lib/neurogrid
-RELEASE_URL="https://github.com/akmalm07/NeuroGrid/releases/download/$VERSION"
-ARCHIVE=NeuroGrid-Node-Linux-x64.tar.gz
+ARCHIVE="${1:-}"
 PYTHON="${NEUROGRID_PYTHON:-python3.12}"
 
 fail() { printf '%s\n' "$*" >&2; exit 1; }
@@ -15,7 +14,8 @@ fail() { printf '%s\n' "$*" >&2; exit 1; }
 [[ $EUID == 0 ]] || fail "Run this installer with sudo."
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || fail "This release requires x86-64 Linux."
 [[ -d /run/systemd/system ]] || fail "This installer requires systemd."
-for command in "$PYTHON" curl tar sha256sum runuser useradd systemctl; do
+[[ -f "$ARCHIVE" && -f "$ARCHIVE.sha256" ]] || fail "Pass the Granite Linux beta archive and its .sha256 file."
+for command in "$PYTHON" tar sha256sum runuser useradd systemctl; do
     command -v "$command" >/dev/null || fail "Required command unavailable: $command"
 done
 
@@ -26,20 +26,13 @@ install -d -m 0755 "$APP_DIR"
 install -d -m 0700 "$CONFIG_DIR"
 install -d -m 0750 -o neurogrid "$STATE_DIR"
 
-if [[ ! -f "$APP_DIR/.headless-installed" ]]; then
-    download=$(mktemp -d)
-    trap 'rm -f -- "$download/$ARCHIVE" "$download/$ARCHIVE.sha256"; rmdir -- "$download"' EXIT
-    curl --fail --silent --show-error --location "$RELEASE_URL/$ARCHIVE" -o "$download/$ARCHIVE"
-    curl --fail --silent --show-error --location "$RELEASE_URL/$ARCHIVE.sha256" -o "$download/$ARCHIVE.sha256"
-    (cd "$download" && sha256sum --check "$ARCHIVE.sha256")
-    tar -xzf "$download/$ARCHIVE" -C "$APP_DIR"
-    NEUROGRID_PYTHON="$PYTHON" "$APP_DIR/install-neurogrid.sh" --headless
-    touch "$APP_DIR/.headless-installed"
-fi
+(cd "$(dirname -- "$ARCHIVE")" && sha256sum --check "$(basename -- "$ARCHIVE").sha256")
+tar -xzf "$ARCHIVE" -C "$APP_DIR"
+NEUROGRID_PYTHON="$PYTHON" "$APP_DIR/install-neurogrid.sh" --headless
 
-# Validate all three node credentials against the expected partition before starting services.
-labels=(Input Transform Output)
-for shard in 0 1 2; do
+labels=(Input "Transform I" "Transform II" Output)
+
+for shard in 0 1 2 3; do
     key_file="$CONFIG_DIR/worker-$((shard + 1)).key"
     if [[ ! -s "$key_file" ]]; then
         read -rsp "Paste the ${labels[shard]} partition key: " key </dev/tty
@@ -52,11 +45,15 @@ for shard in 0 1 2; do
     fi
     printf '%s' "$key" | "$APP_DIR/.venv/bin/python" -c '
 import sys
+from neurogrid_node import RUNTIME
 from neurogrid_node.client import GridClient, GridError
 
 site, shard = sys.argv[1:]
 try:
-    actual = GridClient(site, sys.stdin.read()).call("profile")["shard"]
+    profile = GridClient(site, sys.stdin.read()).call("profile")
+    if profile.get("runtime") != RUNTIME:
+        sys.exit("The coordinator is not serving the Granite runtime.")
+    actual = profile["shard"]
 except (GridError, OSError, ValueError) as exc:
     sys.exit(f"Could not verify node key: {exc}")
 if actual != int(shard):
@@ -76,7 +73,7 @@ if [[ ! -s "$CONFIG_DIR/reference.key" ]]; then
     unset key
 fi
 
-printf '%s\n' "Preparing the shared SmolLM2 cache..."
+printf '%s\n' "Preparing the shared Granite cache..."
 runuser -u neurogrid -- env HF_HOME="$STATE_DIR/huggingface" "$APP_DIR/.venv/bin/python" \
     -c 'from neurogrid_node.model import checkpoint; checkpoint()'
 
@@ -119,8 +116,10 @@ UNIT
 configure_service worker-1 node
 configure_service worker-2 node
 configure_service worker-3 node
+configure_service worker-4 node
 configure_service reference reference
 systemctl daemon-reload
-systemctl enable --now neurogrid-worker-{1,2,3}.service neurogrid-reference.service
-printf '\nServices started. Watch for three online partitions and the verifier at %s/network\n' "$SITE"
+systemctl enable neurogrid-worker-{1,2,3,4}.service neurogrid-reference.service
+systemctl restart neurogrid-worker-{1,2,3,4}.service neurogrid-reference.service
+printf '\nServices started. Watch for four online partitions and the verifier at %s/network\n' "$SITE"
 printf '%s\n' "Logs: sudo journalctl -u 'neurogrid-*.service' -f"

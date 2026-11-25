@@ -1,8 +1,18 @@
-param([switch]$Headless)
+param(
+    [switch]$Headless,
+    [switch]$BootService,
+    [switch]$RotateServiceKey,
+    [switch]$UninstallBootService
+)
 
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Environment = Join-Path $Root '.venv'
+
+if ($BootService -or $RotateServiceKey -or $UninstallBootService) {
+    & (Join-Path $Root 'Configure-NeuroGridService.ps1') -RotateKey:$RotateServiceKey -Uninstall:$UninstallBootService
+    return
+}
 
 if ($env:NEUROGRID_PYTHON) {
     & $env:NEUROGRID_PYTHON -m venv $Environment

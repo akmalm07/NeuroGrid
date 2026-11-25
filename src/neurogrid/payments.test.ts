@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import type { Env } from '../../worker'
 import { startCheckout, stripeOutcome, stripeSettings, verifyStripeSignature } from './payments'
-import { purchaseCents } from './protocol'
+import { fee, purchaseCents } from './protocol'
 
 const id = '1e27e7d5-659d-4c6b-9f6e-c6c61f657bc0'
 
@@ -20,6 +20,15 @@ it('enables live checkout only on its configured HTTPS origin', () => {
   expect(stripeSettings({
     ...settings, NEUROGRID_STRIPE_KEY: 'rk_test_fixture', NEUROGRID_STRIPE_ORIGIN: local,
   }, local)?.live).toBe(false)
+  expect(stripeSettings({
+    ...settings, NEUROGRID_STRIPE_KEY: 'rkcs_test_sandbox_fixture', NEUROGRID_STRIPE_ORIGIN: local,
+  }, local)?.live).toBe(false)
+})
+
+it('prices the pinned Quick and Standard profiles in credits', () => {
+  expect(fee(256, 64)).toBe(2)
+  expect(fee(300, 80)).toBe(4)
+  expect(fee(256, 65)).toBe(3)
 })
 
 it('prices whole-credit orders at one cent per credit, with a one-dollar minimum', () => {
@@ -66,6 +75,17 @@ describe('Stripe webhook verification', () => {
     expect(stripeOutcome(event('checkout.session.expired', 'expired', 'unpaid'), false)?.status).toBe('released')
     expect(stripeOutcome(event('checkout.session.async_payment_failed', 'complete', 'unpaid'), false)?.status).toBe('released')
     expect(stripeOutcome(event('checkout.session.expired', 'expired', 'paid'), false)).toBeUndefined()
+  })
+
+  it('extracts a cumulative refund for a verified PaymentIntent and currency', () => {
+    const charge = { object: 'charge', currency: 'usd', payment_intent: 'pi_example', amount_refunded: 100 }
+    const payload = { id: 'evt_example', type: 'charge.refunded', livemode: false, data: { object: charge } }
+    expect(stripeOutcome(JSON.stringify(payload), false)).toEqual({
+      adjustment: 'refund', intentId: 'pi_example', eventId: 'evt_example', live: false, amount: 100,
+    })
+    expect(stripeOutcome(JSON.stringify(payload), true)).toBeUndefined()
+    charge.currency = 'eur'
+    expect(stripeOutcome(JSON.stringify(payload), false)).toBeUndefined()
   })
 })
 

@@ -41,6 +41,10 @@ jobs:
           $env:QT_QPA_PLATFORM = 'offscreen'
           ./node-install/.venv/Scripts/python.exe -m neurogrid_node.desktop --smoke-test
           if ($LASTEXITCODE -ne 0) { throw 'Desktop launch failed' }
+          ./node-install/.venv/Scripts/python.exe -m unittest discover -s compute/tests -p 'test_*profile.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Shared compute profile tests failed' }
+          ./node-install/.venv/Scripts/python.exe -m unittest discover -s compute/tests -p 'test_service.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Contributor service tests failed' }
           ./node-install/.venv/Scripts/python.exe -c "from neurogrid_node.model import Partition, checkpoint, configure_cpu; configure_cpu(2); assert Partition(checkpoint(), 0).run({'tokens': [1]}, 1)['tensor']"
           if ($LASTEXITCODE -ne 0) { throw 'CPU shard inference failed' }
       - if: matrix.platform == 'linux'
@@ -58,6 +62,8 @@ jobs:
           test -f "$XDG_DATA_HOME/applications/neurogrid-node.desktop"
           grep -Fx "Exec=\"$PWD/node-install/start-neurogrid\"" "$XDG_DATA_HOME/applications/neurogrid-node.desktop"
           QT_QPA_PLATFORM=offscreen ./node-install/start-neurogrid --smoke-test
+          QT_QPA_PLATFORM=offscreen ./node-install/.venv/bin/python -m unittest discover -s compute/tests -p 'test_*profile.py' -v
+          ./node-install/.venv/bin/python -m unittest discover -s compute/tests -p 'test_service.py' -v
           ./node-install/.venv/bin/python -c "from neurogrid_node.model import Partition, checkpoint, configure_cpu; configure_cpu(2); assert Partition(checkpoint(), 0).run({'tokens': [1]}, 1)['tensor']"
       - uses: actions/upload-artifact@v4
         with:
@@ -79,4 +85,7 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" release-dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+        run: |
+          options=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then options+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" release-dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes "${options[@]}"

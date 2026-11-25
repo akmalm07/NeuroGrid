@@ -1,5 +1,5 @@
 import { getAuthToken } from 'deepspace'
-import type { Block, JobSummary, NetworkSnapshot } from './protocol'
+import type { Block, JobSummary, NetworkSnapshot, QuoteSummary } from './protocol'
 
 export interface Account {
   credits: number
@@ -12,11 +12,17 @@ export interface Enrollment { id: string; shard: number; secret: string; expires
 
 export const messages: Record<string, string> = {
   unauthorized: 'Sign in again to continue.',
-  network_busy: 'The network is finishing another request. Try again in a moment.',
-  network_unavailable: 'All three partitions and the verifier must be online.',
-  invalid_request: 'Enter a prompt of 500 characters or fewer.',
-  insufficient_credits: 'Your balance is too low. Choose a shorter token limit.',
-  context_limit: 'This prompt is too long for the 128-token context. Shorten it and try again.',
+  network_busy: 'The queue is full. Try again in a moment.',
+  network_unavailable: 'Granite capacity is unavailable. Try again shortly.',
+  invalid_request: 'Enter a prompt within the 16 KiB input limit.',
+  insufficient_credits: 'Your balance is too low for this request.',
+  context_limit: 'This prompt is too long for Granite’s available context. Shorten it and try again.',
+  quote_mismatch: 'Get a new quote for the edited prompt.',
+  quote_expired: 'Get a new quote before sending.',
+  quote_timeout: 'Preparing the quote took too long. Try again shortly.',
+  preview_only: 'Granite inference is available in the beta test environment.',
+  empty_reply: 'The model returned an empty reply. Your reserved credits were returned.',
+  model_upgraded: 'The model changed while this request was pending. Your reserved credits were returned.',
   inference_timeout: 'The request timed out. Your reserved credits were returned.',
   partition_unavailable: 'A partition lost its worker. Your reserved credits were returned.',
   node_limit: 'You have reached the node limit. Revoke an unused key to make room.',
@@ -56,8 +62,10 @@ export const readCheckoutMode = () => request<{ mode: 'disabled' | 'test' | 'liv
 export const checkoutCredits = (credits: number) => request<{ url: string }>('user/checkout', { credits })
 export const enroll = (shard: string) => request<Enrollment>('user/enroll', shard === 'auto' ? {} : { shard: Number(shard) })
 export const revoke = (id: string) => request<{ ok: boolean }>('user/revoke', { id })
-export const submit = (prompt: string, maxTokens: number, key: string) =>
-  request<JobSummary>('user/request', { prompt, maxTokens, key })
+export const quotePrompt = (prompt: string, key: string) =>
+  request<QuoteSummary>('user/quote', { prompt, key })
+export const submit = (quoteId: string, key: string) =>
+  request<JobSummary>('user/request', { quoteId, key })
 
 export async function readLedger(): Promise<Block[]> {
   const blocks: Block[] = []

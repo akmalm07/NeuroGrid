@@ -7,13 +7,13 @@ import { enroll, explain, readAccount, revoke, type Account, type Enrollment } f
 import { SHARDS } from '../../neurogrid/protocol'
 import { PageHeading } from '../../neurogrid/ui'
 
-const release = 'https://github.com/akmalm07/NeuroGrid/releases/latest/download/'
+const release = 'https://github.com/akmalm07/NeuroGrid/releases/download/v0.2.0-beta.1/'
 const platforms = [
   { name: 'Windows', icon: Monitor, asset: 'NeuroGrid-Node-Windows-x64.zip',
     system: 'Windows 10 or 11 · x86-64 · Python 3.12',
     steps: ['Extract the ZIP to a folder you can keep.', 'Open PowerShell in that folder and run the installer.', 'Search for NeuroGrid Node in the Start menu.'],
     command: 'powershell -NoProfile -ExecutionPolicy Bypass -File .\\Install-NeuroGrid.ps1' },
-  { name: 'Linux', icon: Terminal, asset: 'NeuroGrid-Node-Linux-x64.tar.gz',
+  { name: 'Linux beta', icon: Terminal, asset: 'NeuroGrid-Node-Linux-x64.tar.gz',
     system: 'Ubuntu 24.04 or compatible Linux · x86-64 · Python 3.12 with venv',
     steps: ['Extract the archive to a folder you can keep.', 'Open a terminal in that folder and run the installer.', 'Find NeuroGrid Node in your applications menu.'],
     command: './install-neurogrid.sh' },
@@ -64,7 +64,7 @@ export default function Downloads() {
         <ol>{steps.map((step) => <li key={step}>{step}</li>)}</ol>
         <pre className="command"><code>{command}</code></pre>
       </section>)}</div>
-    <p className="page-note">Allow 4 GB of RAM and 4 GB of free disk space. Installation downloads the CPU runtime and the first launch downloads the pinned model checkpoint. A GPU is optional.</p>
+    <p className="page-note">Allow 12 GB of RAM for a worker and at least 25 GB of free disk space. The first launch downloads the pinned Granite checkpoint.</p>
     <p className="page-note">Running without a desktop? Use the terminal agent included in either archive. <a href="https://github.com/akmalm07/NeuroGrid/blob/main/packaging/INSTALL.md#run-without-a-desktop">Headless setup for Windows and Linux</a></p>
     <section className="surface download-card network-section" aria-labelledby="pair-title">
       <KeyRound size={26} /><h2 id="pair-title">Pair a compute node</h2>

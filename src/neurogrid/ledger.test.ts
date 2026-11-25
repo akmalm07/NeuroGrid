@@ -5,9 +5,11 @@ import { blockBytes, type Block, type BlockData } from './protocol'
 
 function seal(previous: Block | undefined, kind: Block['kind'], reference: string, transfers: Block['transfers']): Block {
   const block: BlockData = {
-    version: 1, height: previous ? previous.height + 1 : 0, previousHash: previous?.hash ?? EMPTY_HASH,
+    version: kind === 'units' || previous?.version === 2 ? 2 : 1,
+    height: previous ? previous.height + 1 : 0, previousHash: previous?.hash ?? EMPTY_HASH,
     createdAt: 1_000, kind, reference, transfers,
-    proof: kind === 'settle' || kind === 'purchase' ? 'a'.repeat(64) : '',
+    proof: kind === 'purchase_adjustment' ? reference.split(':')[1]
+      : kind === 'settle' || kind === 'purchase' ? 'a'.repeat(64) : '',
   }
   return { ...block, hash: createHash('sha256').update(blockBytes(block)).digest('hex') }
 }
@@ -65,5 +67,25 @@ describe('ledger replay', () => {
     const purchase = seal(released, 'purchase', 'order', [['checkout:order', -500], ['acct:buyer', 500]])
     await expect(verifyChain([genesis, grant, checkout, released])).resolves.toMatchObject({ height: 3 })
     await expect(verifyChain([genesis, grant, checkout, released, purchase])).rejects.toThrow('block 4')
+  })
+
+  it('replays the migration, credit issuance, reward, platform retirement, and a Stripe reversal', async () => {
+    const units = seal(grant, 'units', 'granite-credit-subunits-v2', [])
+    const checkout = seal(units, 'checkout', 'order', [])
+    const purchase = seal(checkout, 'purchase', 'order', [['acct:buyer', 100_000]])
+    const hold = seal(purchase, 'reserve', 'job', [['acct:buyer', -2_000], ['held:job', 2_000]])
+    const settled = seal(hold, 'settle', 'job', [['held:job', -2_000], ['acct:worker', 1_400]])
+    const reversed = seal(settled, 'purchase_adjustment', `order:${'b'.repeat(64)}`, [['acct:buyer', -100_000]])
+    const chain = [genesis, grant, units, checkout, purchase, hold, settled, reversed]
+    await expect(verifyChain(chain)).resolves.toMatchObject({ height: 7 })
+    const overRefund = seal(reversed, 'purchase_adjustment', `order:${'c'.repeat(64)}`, [['acct:buyer', -1_000]])
+    await expect(verifyChain([...chain, overRefund])).rejects.toThrow('block 8')
+  })
+
+  it('scales an open legacy Checkout escrow without changing its owner or amount', async () => {
+    const checkout = seal(grant, 'checkout', 'old-order', [['treasury', -500], ['checkout:old-order', 500]])
+    const units = seal(checkout, 'units', 'granite-credit-subunits-v2', [])
+    const purchase = seal(units, 'purchase', 'old-order', [['checkout:old-order', -500_000], ['acct:buyer', 500_000]])
+    await expect(verifyChain([genesis, grant, checkout, units, purchase])).resolves.toMatchObject({ height: 4 })
   })
 })

@@ -5,7 +5,9 @@ ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 case "${1:-}" in
     '') PACKAGE="$ROOT[desktop]" ;;
     --headless) PACKAGE="$ROOT" ;;
-    *) printf '%s\n' 'Usage: ./install-neurogrid.sh [--headless]' >&2; exit 2 ;;
+    --service|--rotate-service-key|--uninstall-service)
+        exec bash "$ROOT/install-neurogrid-service.sh" "$1" ;;
+    *) printf '%s\n' 'Usage: ./install-neurogrid.sh [--headless|--service|--rotate-service-key|--uninstall-service]' >&2; exit 2 ;;
 esac
 "${NEUROGRID_PYTHON:-python3.12}" -m venv "$ROOT/.venv"
 PYTHON="$ROOT/.venv/bin/python"

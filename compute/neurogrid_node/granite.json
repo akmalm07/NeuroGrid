@@ -1,0 +1,28 @@
+{
+  "model": "ibm-granite/granite-4.2-8b",
+  "revision": "a7042144125ce5ae64f89610e8289647fc000b9a",
+  "runtime": "granite-bf16-greedy-v2",
+  "transformers": "4.57.1",
+  "dtype": "bfloat16",
+  "attention": "sdpa",
+  "decoding": { "do_sample": false, "enable_thinking": false },
+  "width": 4096,
+  "vocab": 100352,
+  "context": 4096,
+  "window": 32,
+  "shards": 4,
+  "layersPerShard": 10,
+  "sha256": {
+    "config.json": "85611f4e34633d4e148e6a5f64bc2d3a23ebbc2b014bc87fbda764eecf261cd9",
+    "generation_config.json": "1b9baf0a7959d31d7fb58ff6b506c27d09a73d395cadccc7e6dd1d4b7e43fd9d",
+    "chat_template.jinja": "f0ba43f79b3cabca5e5a7584c77aec92f49feae45cdf7779c87d9fc54cd90258",
+    "tokenizer.json": "883975314d58743726347caaf2c32ac89afd5ad57222cffbc4f052f2ab27b2d7",
+    "tokenizer_config.json": "2007f26df166ed10a2d6fa881c1c8f3cdd151e451469f59b274897f14449835f",
+    "special_tokens_map.json": "e9435fefd6d838fd9fcbbc44b97a8e3ff322be7f6dfb7e4fd2468586574bb52b",
+    "model.safetensors.index.json": "5fa1c5495b1d4a125cc5022b3fbe59b2144ecda39c78a3d37d4e89d60c1090da",
+    "model-00001-of-00004.safetensors": "baed4f3128d1f2e3792ad896ac5621124929bb4f658722f132e614108751e96c",
+    "model-00002-of-00004.safetensors": "69e7a59b810f4c029339b7a208b4dac0c1eee6b88a66e830e74882cbd191803c",
+    "model-00003-of-00004.safetensors": "c2c52fd2baa6ec5003d3ac9842bfd782c0a5a80fc9a1b406a007cae6af008a89",
+    "model-00004-of-00004.safetensors": "0dfcc074193c1cb81270fd6e99cace27d4b0461e8739691c2a347b657c030ffc"
+  }
+}

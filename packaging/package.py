@@ -16,7 +16,9 @@ def make_release(platform: str, output: Path):
         "INSTALL.md": ROOT / "packaging" / "INSTALL.md",
         "pyproject.toml": ROOT / "compute" / "pyproject.toml",
     }
-    files.update({f"neurogrid_node/{path.name}": path for path in (ROOT / "compute" / "neurogrid_node").glob("*.py")})
+    node = ROOT / "compute" / "neurogrid_node"
+    files.update({f"neurogrid_node/{path.name}": path for path in node.glob("*.py")})
+    files["neurogrid_node/granite.json"] = node / "granite.json"
     files.update({path.name: path for path in (ROOT / "packaging" / platform).iterdir()})
     output.mkdir(parents=True, exist_ok=True)
     if platform == "windows":
@@ -29,7 +31,7 @@ def make_release(platform: str, output: Path):
         with tarfile.open(archive, "w:gz") as handle:
             for name, source in files.items():
                 info = handle.gettarinfo(source, arcname=name)
-                info.mode = 0o755 if name in {"start-neurogrid", "install-neurogrid.sh", "neurogrid-agent"} else 0o644
+                info.mode = 0o755 if name.endswith(".sh") or name in {"start-neurogrid", "neurogrid-agent"} else 0o644
                 data = source.read_bytes().replace(b"\r\n", b"\n")
                 info.size = len(data)
                 from io import BytesIO
