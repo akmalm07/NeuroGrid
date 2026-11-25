@@ -3,9 +3,9 @@ import { useAuth } from 'deepspace'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useOutletContext } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
-import { checkoutCredits, explain, messages, readAccount, readCheckoutMode, submit, type Account } from '../../neurogrid/api'
+import { checkoutCredits, explain, messages, quotePrompt, readAccount, readCheckoutMode, submit, type Account } from '../../neurogrid/api'
 import { useGridRevision, useNetwork } from '../../neurogrid/live'
-import { GRANT, MAX_PURCHASE_CREDITS, MIN_PURCHASE_CREDITS, MODEL, SHARDS, fee, purchaseCents } from '../../neurogrid/protocol'
+import { GRANT, MAX_PROMPT_BYTES, MAX_PURCHASE_CREDITS, MIN_PURCHASE_CREDITS, MODEL, SHARDS, purchaseCents, type QuoteSummary } from '../../neurogrid/protocol'
 import { networkReady, PageHeading } from '../../neurogrid/ui'
 
 const suggestions = ['What is a neural network?', 'Why do bees matter?', 'Describe a solar eclipse.']
@@ -17,7 +17,7 @@ export default function Chat() {
   const { result: network } = useNetwork(useGridRevision())
   const [account, setAccount] = useState<{ owner: string; data: Account }>()
   const [prompt, setPrompt] = useState('')
-  const [limit, setLimit] = useState(16)
+  const [quote, setQuote] = useState<{ owner: string; value: QuoteSummary }>()
   const [error, setError] = useState('')
   const [accountError, setAccountError] = useState('')
   const [sending, setSending] = useState(false)
@@ -31,6 +31,8 @@ export default function Chat() {
   const data = account && account.owner === userId ? account.data : undefined
   const pending = data?.jobs.find((job) => job.status !== 'settled' && job.status !== 'refunded')
   const ready = networkReady(network)
+  const activeQuote = quote?.owner === userId ? quote?.value : undefined
+  const withinLimit = new TextEncoder().encode(prompt).length <= MAX_PROMPT_BYTES
   const checkoutReturned = new URLSearchParams(window.location.search).get('checkout') === 'complete'
   const pendingCheckout = data?.pendingCheckout
   const checkoutAmount = pendingCheckout?.credits ?? Number(creditAmount)
@@ -73,23 +75,41 @@ export default function Chat() {
 
   function updatePrompt(value: string) {
     setPrompt(value)
+    setQuote(undefined)
     requestKey.current = ''
     setError('')
   }
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (sending || pending || !prompt.trim() || !userId || !ready || !data) return
+    if (sending || pending || !prompt.trim() || !userId || !ready || !data || !withinLimit) return
     setSending(true)
     setError('')
     requestKey.current ||= crypto.randomUUID()
     try {
-      const job = await submit(prompt, limit, requestKey.current)
+      if (!activeQuote || activeQuote.expires <= Date.now()) {
+        if (activeQuote) requestKey.current = crypto.randomUUID()
+        const key = requestKey.current
+        const deadline = Date.now() + 25_000
+        let draft = await quotePrompt(prompt, key)
+        while (draft.status === 'preparing' && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 450))
+          draft = await quotePrompt(prompt, key)
+        }
+        if (draft.status !== 'ready') throw new Error(draft.reason ?? 'quote_timeout')
+        setQuote({ owner: userId, value: draft })
+        return
+      }
+      const job = await submit(activeQuote.id, requestKey.current)
       updatePrompt('')
       setAccount((previous) => previous?.owner === userId
         ? { owner: userId, data: { ...previous.data,
           jobs: [job, ...previous.data.jobs.filter((item) => item.id !== job.id)] } } : previous)
     } catch (reason) {
+      if (reason instanceof Error && reason.message === 'quote_expired') {
+        setQuote(undefined)
+        requestKey.current = ''
+      }
       setError(explain(reason))
     } finally { setSending(false) }
   }
@@ -116,14 +136,13 @@ export default function Chat() {
   }
 
   return <div className="grid-container page-body">
-    <PageHeading title="Chat">Ask a short question. Three CPU partitions generate the answer one token at a time. Keep sensitive information out of prompts.</PageHeading>
+    <PageHeading title="Chat">Chat with Granite. Recent completed turns provide context for your next reply.</PageHeading>
     <div className="chat-grid">
       <section className="surface chat-panel" aria-label="Conversation">
         <div className="chat-title"><Bot size={21} /><strong>{MODEL}</strong><span className={'live-dot ' + (ready ? 'available' : '')} /></div>
         <div ref={conversation} className="conversation" role="log" aria-label="Chat history">
           {!data?.jobs.length && <div className="chat-welcome">
             <Bot size={36} /><h2>What would you like to ask?</h2>
-            <p>Each prompt starts a fresh context.</p>
             <div className="suggestions">{suggestions.map((item) =>
               <button className="grid-button" key={item} onClick={() => updatePrompt(item)}>{item}</button>)}</div>
           </div>}
@@ -132,7 +151,9 @@ export default function Chat() {
             <div className="assistant-message">
               <Bot size={20} aria-label="NeuroGrid" />
               {job.status === 'settled' ? <div><p>{job.output || 'The model ended without a text response.'}</p>
-                <small>{job.count} tokens · {job.charge} credits</small></div>
+                <small>{job.count} tokens · {job.charge} credits
+                  {job.returned ? ` · ${job.returned} credits returned` : ''}
+                  {job.reason === 'output_limit' ? ' · Output limit reached' : ''}</small></div>
                 : job.status === 'refunded' ? <p>{messages[job.reason] ?? 'Request refunded.'}</p>
                   : <p>{job.status === 'prepare' ? 'Preparing the prompt' : 'Partition ' + (job.stage + 1)
                     + ' · ' + (job.status === 'verifying' ? 'Verifying' : job.status === 'working' ? 'Computing' : 'Waiting')}
@@ -144,17 +165,19 @@ export default function Chat() {
           {error && <p className="form-error" role="alert">{error}</p>}
           <label className="sr-only" htmlFor="prompt">Message</label>
           <textarea id="prompt" value={prompt} disabled={sending} onChange={(event) => updatePrompt(event.target.value)}
-            placeholder="Ask NeuroGrid…" rows={2} maxLength={500}
+            placeholder="Ask NeuroGrid…" rows={2} maxLength={MAX_PROMPT_BYTES}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault()
               event.currentTarget.form?.requestSubmit()
             } }} />
           <div className="composer-bottom">
-            <label>Maximum tokens <select value={limit} disabled={sending} onChange={(event) => { setLimit(Number(event.target.value)); requestKey.current = '' }}>
-              {[4, 8, 16, 24].map((size) => <option key={size}>{size}</option>)}
-            </select></label>
-            {isSignedIn ? <Button type="submit" className="grid-action" aria-label="Send prompt"
-              disabled={!prompt.trim() || !ready || Boolean(pending) || sending || !data}><ArrowUp size={18} />Send</Button>
+            {activeQuote && <span role="status">Up to {activeQuote.credits} credits
+              {activeQuote.trimmed ? ` · ${activeQuote.trimmed} older turns omitted` : ''}</span>}
+            {!withinLimit && <span role="status">This prompt exceeds the input limit.</span>}
+            {isSignedIn ? <Button type="submit" className="grid-action"
+              aria-label={activeQuote ? 'Send prompt' : 'Get quote'}
+              disabled={!prompt.trim() || !ready || Boolean(pending) || sending || !data || !withinLimit}>
+              <ArrowUp size={18} />{activeQuote ? 'Send' : 'Get quote'}</Button>
               : <Button type="button" className="grid-action" onClick={() => showSignIn(true)}>Sign in to chat</Button>}
           </div>
         </form>
@@ -166,7 +189,7 @@ export default function Chat() {
             : <button className="text-link" type="button" onClick={() => showSignIn(true)}>Sign in to view your balance</button>}
           {isSignedIn && accountError && <p className="form-error" role="status">{accountError}</p>}
           {!isSignedIn && <p>New accounts start with {GRANT} free credits while starter credits are available.</p>}
-          <p>Up to {fee(limit)} credits reserved. Unused credits come back to your balance.</p>
+          <p>Quick replies cost 2 credits. Unused credits come back to your balance.</p>
           {checkoutMode !== 'disabled' && <form className="credit-checkout" aria-labelledby="checkout-title" onSubmit={buyCredits}>
             <h3 id="checkout-title">Buy compute credits</h3>
             {checkoutMode === 'test' && <p>Stripe test mode</p>}
@@ -200,7 +223,7 @@ export default function Chat() {
               <span>{index + 1}</span><div>{shard.title}<small>Layers {shard.layers}</small></div>
             </li>)}
           </ol>
-          {!ready && <p className="capacity"><CircleAlert size={16} />Waiting for the verifier and all three partitions.</p>}
+          {!ready && <p className="capacity"><CircleAlert size={16} />Waiting for the verifier and all four partitions.</p>}
           <Link className="text-link" to="/network">Network status</Link>
         </section>
       </aside>

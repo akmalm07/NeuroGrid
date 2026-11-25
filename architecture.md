@@ -1,110 +1,120 @@
 # NeuroGrid architecture
 
-DeepSpace hosts the trusted control plane. Three volunteer PyTorch processes form the CPU inference pipeline. A fourth CPU process, controlled by the operator, independently verifies the outputs. The public website reads network projections and the credit ledger.
+**Implementation status as of November 24, 2026.** The repository's Granite candidate runs four BF16 CPU partitions with reference recomputation. The diagrams describe the target attested architecture. The [release test evidence](docs/granite-beta-results.md) and [handoff](docs/next-feature.md) track open gates. [Watch the animated architecture walkthrough](docs/neurogrid-next-architecture.mp4).
 
-## Technology stack
+## Target architecture
 
-| Area | Technology | Role |
-| --- | --- | --- |
-| Website | React 19, TypeScript, Tailwind CSS 4, Vite | Responsive pages for chat, network status, ledger, and node downloads |
-| HTTP API | Hono on the DeepSpace Worker runtime | Authenticated app routes, coordinator API, and optional Stripe webhook |
-| Platform services | DeepSpace SDK 0.44.2 | App hosting, authentication, Worker runtime, Durable Object bindings, and RecordRoom sync |
-| Coordination and persistence | SQLite-backed Cloudflare Durable Object | Authoritative node registry, leases, jobs, balances, reservations, and ledger blocks |
-| Inference clients | Python 3.12, PyTorch 2.7.1 CPU, Hugging Face Transformers 4.52.4 | Three partition workers and the trusted reference verifier |
-| Desktop client | PySide6 6.9.1 | Optional desktop controls, tray integration, and resource settings for a node |
-| Model | SmolLM2-135M-Instruct, pinned Hugging Face checkpoint | The same immutable model weights are used by workers and reference verifier |
-| Credit integrity | SHA-256 hash-linked records in SQLite | Tamper-evident history under a trusted coordinator; not decentralized consensus |
-| Optional payments | Stripe Checkout and signed webhooks | Moves existing treasury credits to a buyer after confirmed payment |
-
-## Architecture diagram
+NeuroGrid routes inference requests to independently operated compute workers. DeepSpace handles web hosting, authentication, read-only status updates, and the stateless request ingress. The coordinator manages assignments and the credit ledger. Workers produce the inference result and the evidence attached to it. An independent verifier can validate the evidence without running inference.
 
 ```mermaid
 flowchart LR
-    User[User]
-    Browser[React + TypeScript website<br/>Vite, Tailwind CSS]
-    Auth[DeepSpace authentication]
-    Worker[DeepSpace Worker<br/>Hono routes]
-    Sync[DeepSpace RecordRoom<br/>revision notifications]
-    Coordinator[(SQLite-backed<br/>Coordinator Durable Object)]
-    W1[Python CPU worker<br/>Embeddings + layers 1–10]
-    W2[Python CPU worker<br/>Layers 11–20]
-    W3[Python CPU worker<br/>Layers 21–30 + output]
-    Verifier[Trusted Python verifier<br/>reference recomputation]
-    Model[(Pinned Hugging Face<br/>model snapshot)]
-    Stripe[Stripe Checkout<br/>optional]
+    Chat["Chat browser"]
+    Desktop["Desktop app and tray"]
+    CLI["Headless CLI"]
+    Public["Public verifier"]
 
-    User --> Browser
-    Browser <--> Auth
-    Browser -->|chat, node and ledger API| Worker
-    Worker --> Coordinator
-    Coordinator -->|leases and activations| W1
-    W1 -->|verified stage input| Coordinator
-    Coordinator --> W2
-    W2 -->|verified stage input| Coordinator
-    Coordinator --> W3
-    W3 -->|candidate activation and token| Coordinator
-    Coordinator <--> Verifier
-    W1 -. load assigned weights .-> Model
-    W2 -. load assigned weights .-> Model
-    W3 -. load assigned weights .-> Model
-    Verifier -. load reference weights .-> Model
-    Coordinator -->|balances, jobs, blocks| Worker
-    Worker -->|live revision signal| Sync
-    Sync -. notify and refresh snapshot .-> Browser
-    Browser -->|credit purchase| Worker
-    Worker <--> Stripe
+    subgraph Control["DeepSpace control plane"]
+        Edge["Stateless edge ingress and auth"]
+        Router["Model registry and route scheduler"]
+        Ledger["Transactional holds, settlement and ledger"]
+        Status["RecordRoom status"]
+        Verify["Receipt validation and publication"]
+    end
+
+    subgraph Compute["Independently operated compute"]
+        A["Worker A · layers 1–10"]
+        B["Worker B · layers 11–30"]
+        C["Worker C · layers 31–40"]
+    end
+
+    Service["Windows service or Linux systemd unit"]
+    Checkout["Stripe Checkout"]
+
+    Chat -->|"Prompt and request key"| Edge
+    Edge -->|"Trusted ingress hint and authorization"| Router
+    Edge <--> Ledger
+    Router -->|"Scoped assignments"| A
+    Router -->|"Scoped assignments"| B
+    Router -->|"Scoped assignments"| C
+    A -->|"Encrypted activation and receipt"| B
+    B -->|"Encrypted activation and receipt"| C
+    C -->|"Accepted output and receipt chain"| Verify
+    Verify -->|"Stream accepted output"| Edge
+    Verify -->|"Accepted work and usage"| Ledger
+    Verify -->|"Public receipt bundle"| Public
+    Checkout -->|"Verified paid event"| Ledger
+    Router --> Status
+    Ledger --> Status
+    Status --> Chat
+    Desktop -->|"Settings and service control"| Service
+    CLI -->|"Config and service status"| Service
+    Service -->|"Runs the enrolled worker on this machine"| B
 ```
 
-### Component responsibilities
+The three compute boxes illustrate one route. A node can host zero or more adjoining blocks within its resources. A route can use one machine or several, and a different job can use a different route. The contributor apps shown manage one example machine. The compute and control plane paths have separate failure and scaling concerns.
 
-- **Website:** The browser presents the five product pages and sends authenticated chat, node-management, and ledger requests. It displays live status from coordinator snapshots; it does not decide worker identities, verify results, or write balances.
-- **DeepSpace authentication and Worker:** DeepSpace authenticates users and hosts the application. The Hono routes validate the user's identity, enforce API boundaries, and forward authoritative work to the coordinator. Stripe is only involved when credit checkout is configured.
-- **Coordinator Durable Object:** This is the trusted center of the MVP. Its SQLite transaction scope serializes jobs and keeps credit changes, reservations, and corresponding ledger blocks consistent. It chooses workers, issues leases, applies timeouts and failover, validates verifier results, and emits read-only revision updates.
-- **Three Python workers:** Each separately installed CLI or desktop node polls for work and runs only its assigned model partition on CPU. The stages are sequential, so one token passes through all three workers before the next token can be selected.
-- **Reference verifier:** An operator-managed Python process runs the same pinned checkpoint and independently recomputes each stage. It checks numerical agreement and the final greedy token before the coordinator accepts the stage. This is trusted reference checking, not proof that a particular physical machine did the work.
-- **Model snapshot:** Workers and verifier fetch the same pinned Hugging Face files. Each process loads its assigned layer weights; the reference process has the weights needed to recompute all partitions.
-- **RecordRoom and ledger:** RecordRoom carries revision signals so the browser knows to refresh authoritative state. The coordinator stores balances and SHA-256 linked blocks in SQLite. Hashes expose a changed history relative to a known chain head; they do not provide consensus or prevent the trusted coordinator from rewriting the whole chain.
+```mermaid
+sequenceDiagram
+    participant User as Chat
+    participant Edge as Stateless ingress
+    participant Coord as Coordinator and ledger
+    participant A as Earlier layer blocks
+    participant B as Later layer blocks
+    participant Audit as Public verifier
+    User->>Edge: Submit prompt with displayed quote
+    Edge->>Coord: Authorize request with ingress hint
+    Coord->>Coord: Pin route, rate and automatic limits
+    Coord->>Coord: Reserve maximum charge once
+    Coord->>A: Signed lease and encrypted input
+    Coord->>B: Signed lease for next block range
+    A->>B: Encrypted activation and signed receipt
+    B->>B: Check handoff and compute next blocks
+    B-->>Coord: Return reply, usage and receipt chain
+    alt Valid, complete reply
+        Coord->>Coord: Settle once and release unused hold
+        Coord-->>Edge: Deliver final reply and actual charge
+        Edge-->>User: Show reply, balance and receipt
+        Coord-->>Audit: Publish auditable receipt and inclusion
+        Audit->>Audit: Verify evidence and linked commitments
+    else Unrecoverable failure
+        Coord->>Coord: Release reservation once
+        Edge-->>User: Show failure and refund
+    end
+```
 
-## Inference
+## Model and execution
 
-The checkpoint is Hugging Face's SmolLM2-135M-Instruct, revision `12fd25f77366fa6b3b4b768ec3050bf629380bac`, licensed Apache 2.0.
+- **Paid default.** The target is pinned IBM Granite 4.2 8B, a dense Granite decoder with 40 layers, hidden width 4,096, and a 100,352-token vocabulary. Package four 10-layer blocks. Put the embeddings in the first block and the final normalization and vocabulary head in the last. Pin artifact hashes, tokenizer and chat template, numerical format, and sampling policy in the manifest. Each worker loads the ranges it advertises. Benchmark memory, quality, and latency before enabling a quantized variant.
+- **TwIL-8B research.** TwIL-8B uses the same base architecture and has its own weights and model manifest. Its published license limits use to non-commercial research and education. Paid deployment requires commercial permission. The IBM Granite base is Apache-2.0. [Granite model card](https://huggingface.co/ibm-granite/granite-4.2-8b) · [Granite configuration](https://huggingface.co/ibm-granite/granite-4.2-8b/blob/main/config.json) · [TwIL model card](https://huggingface.co/webAI-Official/TwIL-8B) · [TwIL license](https://huggingface.co/webAI-Official/TwIL-8B/blob/main/LICENSE.md)
+- **Inference.** Tokenize with the selected model’s chat template. The server picks automatic context and output limits. The first pass processes the prompt and initializes the KV cache. Later passes run the next token against cache state retained on the assigned workers. Send authenticated, encrypted binary activations stage to stage. A trusted regional relay can carry encrypted traffic where direct connectivity is unavailable. The coordinator accepts worker output with valid evidence. The operator’s current full reference verifier belongs in offline regression testing.
+- **Placement and concurrency.** Admit many independent requests subject to bounded queues and worker capacity. Use a trusted ingress hint such as `request.cf.colo` to shortlist regional workers. Rank complete routes by fresh ingress-to-worker and peer link measurements, warm blocks, queue delay, compute, and failure history. The colo identifies the incoming data center. Treat it as a hint and measure actual serving paths. Co-locate contiguous blocks or select a whole-model worker when that is faster. Keep leases and cache affinity stable until failure or completion. [Cloudflare request metadata](https://developers.cloudflare.com/workers/runtime-apis/request/) · [Petals research](https://arxiv.org/abs/2312.08361)
 
-| Partition | Computation |
+## Verification and trust
+
+The initial release uses **hardware-backed remote attestation**. The signed worker runtime checks the pinned model and signs receipts that bind the job, assignment, block range, sequence, metered work, and input/output and cache state commitments. The next stage checks the handoff before using it. Any observer can check the published evidence, receipt chain, and inclusion with a public verifier and no model execution. A requester can match their reply to its receipt. Public receipts expose commitments and exclude prompt text, activation data, and replies. This guarantee relies on the approved runtime and hardware root of trust. [IETF remote attestation architecture](https://www.rfc-editor.org/rfc/rfc9334) · [NVIDIA attestation](https://docs.nvidia.com/confidential-computing/containers/dev/attestation)
+
+A later **mathematical proof** mode would bind the same statement to the actual numerical operations and verify it independently of hardware attestation. Gate it on measured proving throughput and interactive latency. The scheduler and payment authority remain operator-controlled. Published, independently observed ledger checkpoints make later history changes auditable relative to known checkpoints. [zkLLM research](https://arxiv.org/abs/2404.16109)
+
+## Contributor clients and startup
+
+The target desktop app offers a persistent **Settings → Compute limits** screen and tray entry, saves changes before the first compute run, restores them on reopen, and shows effective limits and node status. Its login-only tray UI can supervise a separately installed background worker. The headless CLI exposes the same saved settings, status, and controls through a validated local configuration and authenticated service interface.
+
+The Windows Service Control Manager and Linux systemd supervise enrolled worker processes at boot. They reuse settings, identity, and model cache before a user signs in, then reconnect when networking is ready. An owner can limit CPU, duty cycle, GPU memory, concurrent sessions, and layer capacity, and retrieve those limits in either interface. Settings and ownership apply whether a process is started at boot or manually. The [handoff](docs/next-feature.md#4-give-contributors-durable-controls) specifies persistence, migration, service recovery, and OS-specific tests. [Windows service startup](https://learn.microsoft.com/en-us/windows/win32/services/service-startup) · [systemd service documentation](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html)
+
+## Credits and accounting
+
+A confirmed purchase issues prepaid service credits. The app quotes and holds a maximum automatically. The launch target is **2 credits for a completed Quick reply**, such as a genuine 8B answer of Paris to “What is the capital of France?” The locked quote covers retries. A completed job releases unused credit, transfers a portion of the charge to workers, and retires the platform share. An unsuccessful job returns the hold in full under the launch policy. Use one transaction for balances, job settlement state, and ledger entries. Keep processor cash, work credits, fiat expenses, and reversals distinct. [Implementation and pricing details](docs/next-feature.md#3-make-each-credit-cover-more-compute) · [Stripe Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment)
+
+## Granite candidate
+
+| Area | Implemented today |
 | --- | --- |
-| Input | Token embeddings and layers 1–10 |
-| Transform | Layers 11–20 |
-| Output | Layers 21–30, final RMS normalization, tied vocabulary projection and greedy argmax |
+| Web and control | React, TypeScript, Hono, DeepSpace auth and RecordRoom, and one SQLite-backed coordinator with a bounded concurrent queue |
+| Model | Pinned IBM Granite 4.2 8B, four ten-layer BF16 CPU partitions, worker-local KV caches, and an operator reference |
+| Chat | Completed turns provide context. The verifier formats inputs with the pinned tokenizer before the coordinator quotes and reserves. |
+| Worker selection | The coordinator pins a complete route using fresh relay-path RTT, verified execution metrics, queue load, failure history, and a Cloudflare location hint. |
+| Contributor settings | Desktop and CLI share a durable profile. SCM and Linux beta systemd installers provision separate service identities and caches. Unattended restart tests remain pending. |
+| Credits | The versioned ledger preserves existing balances and issues new credits after a paid Checkout event. Settlement distributes the reward share and retires the platform share. |
+| Trust | The operator recomputes the numerical result. The public ledger verifies accounting and the integrity of recorded digests. Hardware-backed receipt validation remains a production gate. |
 
-The pinned safetensors file is shared in the machine's model cache. Each node loads only its partition's weights. The CPU implementation uses float32, eager causal attention, rotary position embeddings and no KV cache. Between partitions, the controller sends base64-encoded little-endian float32 activations. It limits prompts to 500 characters, total context to 128 tokens including the chat template and generation allowance, and generation to 24 tokens. Each prompt starts a fresh context.
-
-The trusted reference applies the chat template. It recomputes every shard result and checks the shape, finite values and numerical agreement at relative tolerance 1e-4 and absolute tolerance 2e-4. The third partition's greedy token must match exactly. The controller forwards the canonical reference activation and repeats the cycle until EOS or the requested token limit.
-
-## Coordination
-
-Hono validates DeepSpace JWTs for account actions. An authenticated account creates scoped node keys. Automatic enrollment chooses the least represented partition. Each revocable key is hashed at rest and expires after 30 days. The verifier uses a separate operator-managed DeepSpace secret. Volunteers cannot access that interface.
-
-A SQLite-backed Durable Object handles jobs, nodes, balances and blocks. It processes one request at a time. Nodes poll the coordinator, and availability expires 22 seconds after the last poll. For assignment, the coordinator uses workers that polled within eight seconds so an unresponsive worker cannot block a backup until the stage deadline. It prefers the lowest recent HTTPS round-trip times. It rotates by least recent assignment among workers within 25 ms of the fastest sample. When no eligible worker has a recent sample, it uses assignment history.
-
-The desktop and CLI node echo a one-time challenge when a poll has no work, at most once every 15 seconds. The coordinator measures elapsed time from challenge issuance to the authenticated reply, smooths recent samples, and ignores samples older than one minute. Older clients continue to poll without probes. The measurement covers the worker-to-coordinator path. Model execution time and the user's browser connection are separate.
-
-A lease applies to one node and stage and lasts 12 seconds. If a worker times out or returns an invalid result, the coordinator can route the same stage to a different worker. A waiting stage or verification step has a 12-second deadline, and the entire job has a 180-second limit. The Durable Object alarm expires leases and refunds timed-out jobs while browser tabs are closed.
-
-The DeepSpace RecordRoom broadcasts a read-only revision signal. Browsers fetch the coordinator snapshot on changes and periodically if sync is interrupted. Private job history and balances are scoped to the authenticated user.
-
-## Credits and ledger
-
-Genesis puts 100,000 credits in the treasury. An account can receive a 100-credit grant, while the treasury has funds. The coordinator reserves 1 + 3 × maximum output tokens. A successful request pays one credit per verified shard step and one to the treasury. Unused reserve returns to the requester. An unsuccessful request receives the full reserve and earns zero rewards. Availability is tracked independently of payouts.
-
-Each financial transition and corresponding block append happens in one synchronous SQLite transaction. User-scoped idempotency keys prevent repeated debits. Every block includes a canonical field sequence, the prior SHA-256 hash and pseudonymous transfer deltas. Settlement includes a digest of the verified steps. Replay checks the links and hashes, genesis supply, integer transfers, nonnegative balances and a single terminal event per reservation.
-
-When Stripe Checkout is configured, visitors can quote orders of 100–10,000 whole credits at one US cent per credit. A signed-in buyer's order moves the requested treasury credits to checkout escrow before opening the hosted payment page. Stripe receives an idempotency key tied to the order. A signed paid event for the expected USD amount settles the order exactly once and appends a receipt digest. Confirmed expiration or payment failure releases the escrow. Credits are for NeuroGrid inference and all transitions preserve the original supply. The public ledger does not contain Stripe customer or card data.
-
-## Trust and operation
-
-Reference recomputation confirms output agreement. It duplicates inference arithmetic and cannot prove which physical computer performed the work. A known chain head is required to detect tampering by a coordinator that can rewrite its history. SQLite and access controls suffice under a single trusted operator. Independent validators with shared authority could justify a replicated ledger in a future version.
-
-Volunteers receive model input tokens or internal activations and may be able to infer prompt contents. Keep sensitive data out of prompts. Private chat history persists in SQLite. The coordinator clears raw activations when a job ends.
-
-The hosted control plane needs a connected verifier and at least one available volunteer for each partition. Generating full-context activations per token limits throughput. Test processes on a single host demonstrate separate protocol clients and do not establish independent physical machines.
-
-[Pinned model configuration](https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/blob/12fd25f77366fa6b3b4b768ec3050bf629380bac/config.json) · [DeepSpace documentation](https://docs.deep.space/)
+Use the [README and test runbook](README.md), [installer instructions](packaging/INSTALL.md), and [coordinator source](src/neurogrid/coordinator.ts) to reproduce the candidate. Use the [required test gates](docs/next-feature.md#8-mandatory-implementation-and-release-tests) to assess release readiness.

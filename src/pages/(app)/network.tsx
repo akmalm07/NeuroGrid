@@ -24,10 +24,11 @@ export default function Network() {
     </section>
     <section className="surface registry network-section">
       <h2>Registered nodes</h2>
-      {result?.nodes.length ? <div className="table-scroll"><table><thead><tr><th>Node ID</th><th>Partition</th><th>Layers</th><th>Status</th></tr></thead>
+      {result?.nodes.length ? <div className="table-scroll"><table><thead><tr><th>Node ID</th><th>Partition</th><th>Layers</th><th>Status</th><th>Coordinator RTT</th></tr></thead>
         <tbody>{result.nodes.map((node) => <tr key={node.id}>
           <td><code>{node.id.split('-')[0]}</code></td><td>{SHARDS[node.shard].title}</td><td>{SHARDS[node.shard].layers}</td>
           <td><span className={'live-dot ' + (node.status === 'online' || node.status === 'working' ? 'available' : '')} />{node.status}</td>
+          <td>{node.pingMs === undefined ? '—' : `${node.pingMs} ms`}</td>
         </tr>)}</tbody></table></div> : <p>{result ? 'No nodes have paired with this network yet.' : 'Loading registered nodes…'}</p>}
     </section>
   </div>

@@ -1,55 +1,65 @@
 # Install NeuroGrid Node
 
-Use 64-bit Windows 10 or 11, or an x86-64 Linux desktop such as Ubuntu 24.04. Allow 4 GB of RAM and 4 GB of free disk space. Install Python 3.12 with the Python Launcher on Windows, or with the `venv` package on Linux. A GPU is optional.
+The source packages serve **IBM Granite 4.2 8B**. Linux is **beta**. Use x86-64 Windows 10 or 11, or Ubuntu 24.04 or compatible Linux with Python 3.12 and venv. Allow at least 12 GB RAM for one contributor and 25 GB disk for the runtime and pinned checkpoint.
 
-Extract the archive to a permanent folder. Open a terminal in that folder.
+## Desktop and headless
 
-- On Windows run `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-NeuroGrid.ps1`. Search for **NeuroGrid Node** in Start after installation. You can also use `Start NeuroGrid.cmd`. The execution policy setting applies to the installer process.
-- On Linux run `./install-neurogrid.sh`. Search for **NeuroGrid Node** in your applications menu. You can also run `./start-neurogrid`. If Qt cannot load the desktop backend, install your distribution's Qt XCB runtime dependencies, including `libxcb-cursor0` on Ubuntu.
+Extract the archive to a permanent folder. Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-NeuroGrid.ps1` on Windows or `./install-neurogrid.sh` on Linux. Open **NeuroGrid Node** from the application menu. Linux desktop users may need their distribution's Qt XCB dependencies.
 
-These installers create a local Python environment and download PySide6 and CPU PyTorch. On first connect the app downloads the pinned SmolLM2 checkpoint. The Windows model cache sits under `%LOCALAPPDATA%\NeuroGrid\models`. Each node loads only its assigned weights into the inference runtime.
+Choose **Settings → Compute limits**, set the site and CPU limits, and select **Save**. Paste a node key from Downloads, then select **Start**. Settings are also available from the tray during compute. Pause and restart the worker to apply saved changes. The sign-in startup option controls the tray app, and the OS keyring stores its credential when available.
 
-In the NeuroGrid website's **Downloads** page, sign in, create a node key, and paste it and the site address into the desktop app. Set the CPU thread count and approximate compute duty cycle, then select **Start**. Use **Pause** or **Quit** in the window or the system tray. Tray support depends on the desktop environment. The app uses the operating-system keyring when one is available. Otherwise the node key needs to be reentered after relaunch.
+Use `-Headless` on Windows or `--headless` on Linux to install without Qt. The launcher is `.\neurogrid-agent.cmd` on Windows and `./neurogrid-agent` on Linux.
 
-Check **Launch and resume when I sign in** to enable automatic startup. Clear it before moving or removing the extracted folder. Revoke unused keys in Downloads.
-
-## Run without a desktop
-
-### Keep all three partitions and the verifier online on one Linux host
-
-Use Ubuntu 24.04 or another x86-64 Linux host with systemd, Python 3.12, venv, and curl. On the hosted [Downloads page](https://neurogrid.app.space/downloads), sign in and create one distinct key for each of **Input**, **Transform**, and **Output**. Have the operator's `NEUROGRID_VERIFIER_SECRET` ready from the production DeepSpace secrets config.
-
-Run `sudo bash packaging/linux/install-neurogrid-host.sh` from a source checkout. The script downloads and verifies the v0.1.5 Linux archive, validates which partition each node key belongs to, and prompts for credentials without echoing them. It starts four systemd services with one CPU thread each and enables startup at boot. The processes share a local model cache. Rerunning the script reuses the saved keys. Other machines can join with their own node keys.
-
-```sh
-sudo systemctl status neurogrid-worker-{1,2,3}.service neurogrid-reference.service --no-pager
-sudo journalctl -u 'neurogrid-*.service' -f
+```text
+neurogrid-agent config show
+neurogrid-agent config set --threads 2 --duty 50
+neurogrid-agent status
+neurogrid-agent node
 ```
 
-Wait for [Network](https://neurogrid.app.space/network) to show all three partitions and the verifier online, then submit a short prompt. Node keys expire after 30 days. To rotate one, rename its root-owned file in `/etc/neurogrid`, rerun the script with a new key for the same partition, and restart that service.
+Supply `NEUROGRID_SECRET` in the worker process environment. Use a silent input prompt and clear the variable when finished. Config and status commands redact credentials.
 
-### Run a single headless node
+The default profile is `%LOCALAPPDATA%\NeuroGrid\profile.json` on Windows and `${XDG_CONFIG_HOME:-$HOME/.config}/neurogrid/profile.json` on Linux. First use imports the current user's saved site, CPU, duty cycle, and sign-in preference. Use `config --profile PATH show`, `status --profile PATH`, or `node --profile PATH` for a separate profile. Use a distinct node key per worker.
 
-The headless installer skips Qt and desktop registration. Create a node key on the website's **Downloads** page. From the extracted folder, run the commands for your system.
+## Boot service
 
-Windows PowerShell
+A boot worker has its own profile, key, and model cache. Enroll it using the compatible local or staging coordinator.
+
+### Windows
+
+Install signed Python 3.12 for all users in `%ProgramFiles%\Python312`. Extract the package to `%ProgramFiles%\NeuroGrid` and open elevated PowerShell there.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-NeuroGrid.ps1 -Headless
-$env:NEUROGRID_SECRET = [System.Net.NetworkCredential]::new('', (Read-Host 'Node key' -AsSecureString)).Password
-.\neurogrid-agent.cmd node --url https://neurogrid.app.space --threads 2 --duty 50
-Remove-Item Env:NEUROGRID_SECRET
+.\Install-NeuroGrid.ps1 -BootService
+Get-Service NeuroGridContributor
+Get-Content "$env:ProgramData\NeuroGridContributor\service.log" -Tail 25
+.\neurogrid-agent.cmd status --profile "$env:ProgramData\NeuroGridContributor\profile.json"
 ```
 
-Linux Bash
+The SCM runs the signed Python executable with the NeuroGrid dispatcher under LocalService and a per-service SID. The installation prompts for the site and node key on first use. Use `-RotateServiceKey` to re-enroll and `-UninstallBootService` to remove the service. The profile and model cache are retained.
 
-```bash
-./install-neurogrid.sh --headless
-read -rsp 'Node key: ' NEUROGRID_SECRET; printf '\n'
-NEUROGRID_SECRET="$NEUROGRID_SECRET" ./neurogrid-agent node --url https://neurogrid.app.space --threads 2 --duty 50
-unset NEUROGRID_SECRET
+### Linux beta
+
+Use root on a systemd system and enter the service site and key when prompted.
+
+```sh
+sudo ./install-neurogrid.sh --service
+sudo systemctl status neurogrid-contributor.service
+sudo journalctl -u neurogrid-contributor.service
+sudo ./neurogrid-agent status --profile /var/lib/neurogrid-contributor/profile.json
 ```
 
-The agent prints its node ID, assigned partition, and work status. Use `--help` to see options and Ctrl+C to stop. On Linux, a service manager can run the same foreground command and stop it with SIGTERM. Use a separate node key per process.
+Use `--rotate-service-key` to replace enrollment or `--uninstall-service` to remove the unit. The service account owns its profile and cache, and systemd loads the credential from a root-protected file.
 
-Desktop and headless clients starting with v0.1.4 periodically reply to a coordinator ping so the network can prefer lower-latency workers. To upgrade an existing installation, stop the node, extract the release over its existing files, rerun the installer, and restart the node.
+On either OS edit the service profile from an elevated shell. Use `config --profile PATH set --pause` and restart the service to persist a pause. Use `--resume` and restart it to share compute again. Keys expire after 30 days and can be revoked from Downloads.
+
+### Run all development roles on a Linux host
+
+This Linux beta installer needs the reference key and four distinct worker keys. Keep the local archive and checksum together.
+
+```sh
+sudo bash packaging/linux/install-neurogrid-host.sh /path/to/NeuroGrid-Node-Linux-x64.tar.gz
+sudo systemctl status neurogrid-worker-{1,2,3,4}.service neurogrid-reference.service
+```
+
+The four workers and reference share the pinned model cache. See the [local test runbook](../README.md#local-development) for isolated configuration.

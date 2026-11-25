@@ -3,7 +3,7 @@ from pathlib import Path
 from threading import Event
 from unittest.mock import Mock, patch
 
-from neurogrid_node import REVISION
+from neurogrid_node import REVISION, RUNTIME
 from neurogrid_node.client import GridError, run_node
 
 
@@ -16,9 +16,10 @@ class NodeClientTest(unittest.TestCase):
             if action == "profile":
                 if client.call.call_count == 1:
                     raise GridError("busy", 503)
-                return {"id": "node", "revision": REVISION, "shard": 0}
+                return {"id": "node", "revision": REVISION, "runtime": RUNTIME, "shard": 0}
             if action == "claim":
-                return {"work": {"input": {}, "length": 1, "lease": "test"}}
+                return {"work": {"input": {}, "length": 1, "lease": "test", "job": "job",
+                                 "epoch": 0, "position": 0, "emit": True}}
             if action == "result":
                 stop.set()
                 return {"accepted": False, "reason": "malformed_result"}
