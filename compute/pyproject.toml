@@ -3,27 +3,27 @@ requires = ["setuptools>=78"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "neurogrid-node"
+name = "neurogrid"
 version = "0.2.0b1"
-description = "Volunteer Granite inference node for NeuroGrid"
+description = "Reproducible cryptographic inference research for IBM Granite"
 requires-python = ">=3.12,<3.13"
-dependencies = [
+[project.optional-dependencies]
+granite = [
   "torch==2.7.1",
   "transformers==4.57.1",
   "huggingface-hub==0.36.2",
   "safetensors==0.5.3",
   "numpy==2.5.5",
 ]
-
-[project.optional-dependencies]
-desktop = ["PySide6==6.9.1", "keyring==25.6.0"]
+verify = ["ezkl==23.0.5"]
+proofs = ["ezkl==23.0.5", "numpy==2.5.5", "onnx==1.20.1", "onnxruntime==1.24.4"]
 
 [project.scripts]
-neurogrid-node = "neurogrid_node.desktop:main"
-neurogrid-agent = "neurogrid_node.client:main"
+neurogrid = "neurogrid.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["neurogrid_node*"]
+include = ["neurogrid*"]
 
 [tool.setuptools.package-data]
-neurogrid_node = ["granite.json"]
+"neurogrid.models" = ["granite.json"]
+"neurogrid.proofs" = ["wasi.mjs"]

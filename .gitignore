@@ -23,3 +23,9 @@ output/playwright/
 release-dist/
 *.spec
 test-results/
+
+*.egg-info/
+.pytest_cache/
+
+/compute/build/
+.ruff_cache/

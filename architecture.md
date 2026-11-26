@@ -1,104 +1,27 @@
-# NeuroGrid architecture
+# NeuroGrid research architecture
 
-The Granite candidate runs four BF16 CPU partitions with reference recomputation. The diagrams describe the target distributed architecture. The [CPU proof pilot](#cpu-proof-of-inference-pilot) implements an independent verifier for a small model.
+NeuroGrid studies efficient cryptographic proofs of LLM inference. The pinned IBM Granite 4.2 8B BF16 runtime provides a deterministic numerical reference. Q18 proof experiments preserve the checkpoint weights and define their own reproducible fixed-point execution. The complete small-transformer proofs cover token generation. Granite's independently verified compact proofs currently cover the layer-zero query, key and value projections.
 
+| Boundary | Implementation |
+| --- | --- |
+| Checkpoint identity and BF16 inference | [Models](compute/neurogrid/models) |
+| Exact activation encoding | [BF16 tensors](compute/neurogrid/models/activation.py) |
+| Proving and independent verification | [Python proof backends](compute/neurogrid/proofs) and [native GKR](compute/native/tensor_gkr) |
+| Polynomial commitments and rescaling | [Tensor PCS](compute/native/tensor_gkr/tensor_pcs.go) and [Q18 circuit](compute/native/tensor_gkr/compact_rescale.go) |
+| Reproduction and profiling | [Benchmarks](compute/neurogrid/benchmarks) and [test fixtures](docs/reproducibility.md) |
+| Historical Kimchi baselines | [Node proofs](research/kimchi) |
 
-## Target architecture
+The prover receives private inputs and keys, produces a response and writes evidence. The independent verifier receives an issued request and public artifacts from a trusted installation. It checks the exact statement and all required proof links using the supplied bundle. The verifier for a compact projection never loads the checkpoint. BF16 numerical parity is tested separately.
 
-NeuroGrid routes inference requests to independently operated compute workers. DeepSpace handles web hosting, authentication, read-only status updates, and the stateless request ingress. The coordinator manages assignments and the credit ledger. Workers produce the inference result and the evidence attached to it. An independent verifier can validate the evidence without running inference.
+The previous application, browser verifier, deployment configuration and associated experiments are preserved at the Git tag `website-last-working`. The tagged tree records the earlier hosted and browser results.
 
-```mermaid
-flowchart LR
-    Chat["Chat browser"]
-    Desktop["Desktop app and tray"]
-    CLI["Headless CLI"]
-    Public["Public verifier"]
-
-    subgraph Control["DeepSpace control plane"]
-        Edge["Stateless edge ingress and auth"]
-        Router["Model registry and route scheduler"]
-        Ledger["Transactional holds, settlement and ledger"]
-        Status["RecordRoom status"]
-        Verify["Receipt validation and publication"]
-    end
-
-    subgraph Compute["Independently operated compute"]
-        A["Worker A · layers 1–10"]
-        B["Worker B · layers 11–30"]
-        C["Worker C · layers 31–40"]
-    end
-
-    Service["Windows service or Linux systemd unit"]
-    Checkout["Stripe Checkout"]
-
-    Chat -->|"Prompt and request key"| Edge
-    Edge -->|"Trusted ingress hint and authorization"| Router
-    Edge <--> Ledger
-    Router -->|"Scoped assignments"| A
-    Router -->|"Scoped assignments"| B
-    Router -->|"Scoped assignments"| C
-    A -->|"Encrypted activation and receipt"| B
-    B -->|"Encrypted activation and receipt"| C
-    C -->|"Accepted output and receipt chain"| Verify
-    Verify -->|"Stream accepted output"| Edge
-    Verify -->|"Accepted work and usage"| Ledger
-    Verify -->|"Public receipt bundle"| Public
-    Checkout -->|"Verified paid event"| Ledger
-    Router --> Status
-    Ledger --> Status
-    Status --> Chat
-    Desktop -->|"Settings and service control"| Service
-    CLI -->|"Config and service status"| Service
-    Service -->|"Runs the enrolled worker on this machine"| B
-```
-
-The three compute boxes illustrate one route. A node can host zero or more adjoining blocks within its resources. A route can use one machine or several, and a different job can use a different route. The contributor apps shown manage one example machine. The compute and control plane paths have separate failure and scaling concerns.
-
-```mermaid
-sequenceDiagram
-    participant User as Chat
-    participant Edge as Stateless ingress
-    participant Coord as Coordinator and ledger
-    participant A as Earlier layer blocks
-    participant B as Later layer blocks
-    participant Audit as Public verifier
-    User->>Edge: Submit prompt with displayed quote
-    Edge->>Coord: Authorize request with ingress hint
-    Coord->>Coord: Pin route, rate and automatic limits
-    Coord->>Coord: Reserve maximum charge once
-    Coord->>A: Signed lease and encrypted input
-    Coord->>B: Signed lease for next block range
-    A->>B: Encrypted activation and signed receipt
-    B->>B: Check handoff and compute next blocks
-    B-->>Coord: Return reply, usage and receipt chain
-    alt Valid, complete reply
-        Coord->>Coord: Settle once and release unused hold
-        Coord-->>Edge: Deliver final reply and actual charge
-        Edge-->>User: Show reply, balance and receipt
-        Coord-->>Audit: Publish auditable receipt and inclusion
-        Audit->>Audit: Verify evidence and linked commitments
-    else Unrecoverable failure
-        Coord->>Coord: Release reservation once
-        Edge-->>User: Show failure and refund
-    end
-```
-
-## Model and execution
-
-- **Paid default.** The target is pinned IBM Granite 4.2 8B, a dense Granite decoder with 40 layers, hidden width 4,096, and a 100,352-token vocabulary. Package four 10-layer blocks. Put the embeddings in the first block and the final normalization and vocabulary head in the last. Pin artifact hashes, tokenizer and chat template, numerical format, and sampling policy in the manifest. Each worker loads the ranges it advertises. Benchmark memory, quality, and latency before enabling a quantized variant.
-- **TwIL-8B research.** TwIL-8B uses the same base architecture and has its own weights and model manifest. Its published license limits use to non-commercial research and education. Paid deployment requires commercial permission. The IBM Granite base is Apache-2.0. [Granite model card](https://huggingface.co/ibm-granite/granite-4.2-8b) · [Granite configuration](https://huggingface.co/ibm-granite/granite-4.2-8b/blob/main/config.json) · [TwIL model card](https://huggingface.co/webAI-Official/TwIL-8B) · [TwIL license](https://huggingface.co/webAI-Official/TwIL-8B/blob/main/LICENSE.md)
-- **Inference.** Tokenize with the selected model’s chat template. The server picks automatic context and output limits. The first pass processes the prompt and initializes the KV cache. Later passes run the next token against cache state retained on the assigned workers. Send authenticated, encrypted binary activations stage to stage. A trusted regional relay can carry encrypted traffic where direct connectivity is unavailable. The coordinator accepts worker output with valid evidence. The operator’s current full reference verifier belongs in offline regression testing.
-- **Placement and concurrency.** Admit many independent requests subject to bounded queues and worker capacity. Use a trusted ingress hint such as `request.cf.colo` to shortlist regional workers. Rank complete routes by fresh ingress-to-worker and peer link measurements, warm blocks, queue delay, compute, and failure history. The colo identifies the incoming data center. Treat it as a hint and measure actual serving paths. Co-locate contiguous blocks or select a whole-model worker when that is faster. Keep leases and cache affinity stable until failure or completion. [Cloudflare request metadata](https://developers.cloudflare.com/workers/runtime-apis/request/) · [Petals research](https://arxiv.org/abs/2312.08361)
-
-## Verification and trust
-
-The hardware-backed design uses **remote attestation**. The signed worker runtime checks the pinned model and signs receipts that bind the job, assignment, block range, sequence, metered work, and input/output and cache state commitments. The next stage checks the handoff before using it. Any observer can check the published evidence, receipt chain, and inclusion with a public verifier and no model execution. A requester can match their reply to its receipt. Public receipts expose commitments and exclude prompt text, activation data, and replies. This guarantee relies on the approved runtime and hardware root of trust. [IETF remote attestation architecture](https://www.rfc-editor.org/rfc/rfc9334) · [NVIDIA attestation](https://docs.nvidia.com/confidential-computing/containers/dev/attestation)
+## Proof architectures and historical benchmarks
 
 ### CPU proof of inference pilot
 
-The pilot in [compute/proofs](compute/proofs) uses Kimchi/Pickles zero-knowledge proofs on ordinary CPUs. A fixed circuit defines a deterministic two-stage integer attention model with a four-token vocabulary, one cached key/value pair per stage and two generated tokens. The pinned verification key commits to the model weights, attention rules and greedy decoding, including the order used for ties. [Kimchi specification](https://o1-labs.github.io/proof-systems/specs/kimchi/) · [Circuit source](compute/proofs/circuit.ts)
+The pilot in [research/kimchi](research/kimchi) uses Kimchi/Pickles zero-knowledge proofs on ordinary CPUs. A fixed circuit defines a deterministic two-stage integer attention model with a four-token vocabulary, one cached key/value pair per stage and two generated tokens. The pinned verification key commits to the model weights, attention rules and greedy decoding, including the order used for ties. [Kimchi specification](https://o1-labs.github.io/proof-systems/specs/kimchi/) · [Circuit source](research/kimchi/circuit.ts)
 
-The requester issues an assignment with the input commitment, job ID, epoch and one lease per stage and token position. Each proof checks the stage's numerical operations and binds these assignment fields to four salted Poseidon commitments for the input, output and before/after cache. The verifier uses an independently obtained assignment to check all four proofs and the activation, autoregressive token and cache links. The private input, activations, cache and output tokens are absent from the public receipt. A requester can privately open both reply token commitments. The verifier needs the public artifacts and pinned key and performs no model execution. [Receipt verifier](compute/proofs/receipt.ts)
+The requester issues an assignment with the input commitment, job ID, epoch and one lease per stage and token position. Each proof checks the stage's numerical operations and binds these assignment fields to four salted Poseidon commitments for the input, output and before/after cache. The verifier uses an independently obtained assignment to check all four proofs and the activation, autoregressive token and cache links. The private input, activations, cache and output tokens are absent from the public receipt. A requester can privately open both reply token commitments. The verifier needs the public artifacts and pinned key and performs no model execution. [Receipt verifier](research/kimchi/receipt.ts)
 
 Run from the repository root with Node 24 after `npm ci`. Use unused file names or pass paths in a scratch directory. Keep `input-opening.json` and `reply.json` private.
 
@@ -107,38 +30,38 @@ npm run proof:pilot -- issue 2 assignment.json input-opening.json
 npm run proof:pilot -- prove assignment.json input-opening.json receipt.json reply.json
 npm run proof:pilot -- verify assignment.json receipt.json
 npm run proof:pilot -- verify assignment.json receipt.json reply.json
-npm run test:proof
+npm test
 ```
 
 On Windows 11 with a Ryzen 5 5600X and Node 24.22.3, the seven proof tests passed. One run produced a 121 kB receipt in 60.5 seconds and verified it in 6.5 seconds in a separate process with only the verifier, pinned key, public assignment and receipt. The tests rejected an invalid model label, a forged activation, altered cache or output commitments, a substituted proof and replay under a different job, epoch or lease. Linux execution and full Granite proof latency remain unverified.
 
-The pilot runs outside the coordinator and ledger. Granite's current BF16 path still uses reference verification. Moving paid Granite jobs to proofs requires a pinned provable Granite numerical format and full circuit coverage, an audit of the constraints, measured proving and verification costs, and an end-to-end test that verifies before settling the credit hold. The coordinator must separately check worker identity, lease freshness and idempotent settlement. [zkLLM research](https://arxiv.org/abs/2404.16109)
+The BF16 runtime is a numerical reference. End-to-end Granite proofs require a pinned fixed-point specification, full circuit coverage, and verification of the state links across operations. [zkLLM research](https://arxiv.org/abs/2404.16109)
 
 ### Granite checkpoint projection benchmark
 
-The [Granite projection verifier](compute/proofs/granite-receipt.ts) checks a proof for one output row of the first layer's query projection. The exporter reads the pinned checkpoint using the existing tokenizer and partition loader. It extracts one normalized token activation and the 4,096 learned weights in the row. It rounds weights to signed integers at scale 4,096 and activations at scale 64. The circuit checks the exact integer dot product, binds the input to a salted commitment and binds the result to the request and model revision. The verifier uses the pinned circuit key, public assignment and receipt. This arithmetic benchmark covers one projected value and the chat release requires the full inference proof.
+The [Granite projection verifier](research/kimchi/granite-receipt.ts) checks a proof for one output row of the first layer's query projection. The exporter reads the pinned checkpoint using the existing tokenizer and partition loader. It extracts one normalized token activation and the 4,096 learned weights in the row. It rounds weights to signed integers at scale 4,096 and activations at scale 64. The circuit checks the exact integer dot product, binds the input to a salted commitment and binds the result to the request and model revision. The verifier uses the pinned circuit key, public assignment and receipt. This arithmetic benchmark covers one projected value.
 
 Run the exporter with the installed Python dependencies and `compute` on `PYTHONPATH`. Use a scratch directory for the generated artifacts. The sample and opening contain private witness material. The public receipt includes the projected integer.
 
 ```sh
-python compute/proofs/export_granite_projection.py --checkpoint /path/to/pinned/granite --position 6 --output sample.json
+neurogrid benchmark granite-projection --checkpoint /path/to/pinned/granite --position 6 --output sample.json
 npm run proof:pilot -- granite-issue sample.json assignment.json opening.json
 npm run proof:pilot -- granite-prove sample.json assignment.json opening.json receipt.json
 npm run proof:pilot -- granite-verify assignment.json receipt.json
 ```
 
-Set `NEUROGRID_PROJECTION_SAMPLE` to the exported sample and run `npm run test:granite-proof` to check the independent verifier, modified results, replay, and changed weights and activation. `granite-export-key` regenerates the circuit key from a sample exported from the manifest-verified checkpoint.
+Set `NEUROGRID_PROJECTION_SAMPLE` to the exported sample and run `npm test` to check the independent verifier, modified results, replay, and changed weights and activation. `granite-export-key` regenerates the circuit key from a sample exported from the manifest-verified checkpoint.
 
-All three benchmark tests passed on Windows 11 with a Ryzen 5 5600X and Node 24.22.3 using Granite revision `a7042144125ce5ae64f89610e8289647fc000b9a`. The prover produced a 29.9 kB receipt in 30.1 seconds after 4.0 seconds of cached key setup. A separate process checked it in 4.2 seconds using the key, assignment and receipt. Hosted chat remains paused pending full Granite proofs.
+All three benchmark tests passed on Windows 11 with a Ryzen 5 5600X and Node 24.22.3 using Granite revision `a7042144125ce5ae64f89610e8289647fc000b9a`. The prover produced a 29.9 kB receipt in 30.1 seconds after 4.0 seconds of cached key setup. A separate process checked it in 4.2 seconds using the key, assignment and receipt.
 
 ### Full-layer prover compatibility
 
-[The decode compatibility check](compute/proofs/check_granite_decode_backend.py) exports a full first-layer decode step from the pinned checkpoint. It compares the decoder's hidden-state output and updated key and value tensors across PyTorch and ONNX Runtime on CPU, using both the original sample and changed inputs. The export uses FP32 and the existing eager attention implementation to express grouped-query attention as portable ONNX operators. A candidate proof runtime still needs a defined numerical format and end-to-end answer quality checks.
+[The decode compatibility check](compute/neurogrid/benchmarks/granite_decode.py) exports a full first-layer decode step from the pinned checkpoint. It compares the decoder's hidden-state output and updated key and value tensors across PyTorch and ONNX Runtime on CPU, using both the original sample and changed inputs. The export uses FP32 and the existing eager attention implementation to express grouped-query attention as portable ONNX operators. A candidate proof runtime still needs a defined numerical format and end-to-end answer quality checks.
 
 Run with `compute` on `PYTHONPATH`, the existing Python 3.12 node dependencies, `onnx==1.20.1` and `onnxruntime==1.24.4`. Add `ezkl==23.0.5` for the optional compiler check. The output directory is a new scratch directory for the exported graph and private sample input.
 
 ```sh
-python compute/proofs/check_granite_decode_backend.py --checkpoint /path/to/pinned/granite --output /path/to/scratch/decode-check --position 6 --ezkl-columns 2
+neurogrid benchmark granite-decode --checkpoint /path/to/pinned/granite --output /path/to/scratch/decode-check --position 6 --ezkl-columns 2
 ```
 
 Use `--ezkl-columns 8 --ezkl-witness-scale 14` to calibrate, compile and compare the witness's output and cache against the CPU layer. The check stops if calibration or parity fails. This diagnostic uses a pinned checkpoint and one fixed token position.
@@ -183,12 +106,12 @@ Sumcheck can reduce a matrix product claim to polynomial evaluation claims. A po
 Run the isolated proof benchmark with a trusted Halo2 SRS for the calibrated domain. The parity gate runs before setup and proving. The separate verifier process opens only trusted verification artifacts and the public claim and proof. It tests modified claims, modified proof instances and modified proof bytes. The benchmark reports separate peak resident memory and elapsed time for setup, proving and verification, plus the raw proof and serialized file sizes.
 
 ```sh
-python compute/proofs/check_granite_decode_backend.py --checkpoint /path/to/pinned/granite --output /path/to/new/scratch --position 6 --center-attention-logits --ezkl-columns 56 --ezkl-witness-scale 18 --ezkl-logrows 22 --ezkl-lookup-range -31164814 3766998 --srs /path/to/halo2.srs
-python compute/proofs/audit_granite_decode.py --export /path/to/export --output /path/to/new/audit --fragments attention-logits softmax grouped-attention --scales 7 10 14
-python -m unittest discover -s compute/proofs -p 'test_*.py' -v
+neurogrid benchmark granite-decode --checkpoint /path/to/pinned/granite --output /path/to/new/scratch --position 6 --center-attention-logits --ezkl-columns 56 --ezkl-witness-scale 18 --ezkl-logrows 22 --ezkl-lookup-range -31164814 3766998 --srs /path/to/halo2.srs
+neurogrid benchmark granite-audit --export /path/to/export --output /path/to/new/audit --fragments attention-logits softmax grouped-attention --scales 7 10 14
+python -m unittest discover -s compute/tests -p 'test_*.py' -v
 ```
 
-To verify a proof in a separate environment, place the verifier, trusted settings, verification key, SRS, proof and expected public claim there. Run `python granite_layer_proof.py verify proof.json ezkl-settings.json vk.key halo2.srs claim.json`.
+To verify a proof in a separate environment, place the verifier, trusted settings, verification key, SRS, proof and expected public claim there. Run `neurogrid benchmark halo2 verify proof.json ezkl-settings.json vk.key halo2.srs claim.json`.
 
 For public witness diagnostics, replace `--srs /path/to/halo2.srs` with `--public-tensors`. This mode records numerical evidence even when the selected layout cannot reach the proving stage.
 
@@ -196,13 +119,13 @@ Both harness tests passed on this host. The arithmetic smoke test used a locally
 
 ### Segmented Q18 proving
 
-The [segmented transformer benchmark](compute/proofs/segmented_benchmark.py) uses one small decoder layer with four hidden lanes, two query heads, one KV head, an eight-lane SiLU feed-forward network, and a four-token vocabulary. Its weights are deterministically initialized for the test. It proves the complete token-to-token calculation for this model, including embedding, both layer RMSNorms, projections, rotary attention, causal masking, KV updates, residuals, SiLU, final RMSNorm, logits and first-index greedy selection. Two prompt tokens start the trace. The first generated token is then embedded as the next input to generate the second reply token. The fixed-point circuits keep 18 fractional bits at floating-tensor boundaries. Attention applies the `1/128` scale and explicit row-max subtraction before exponentiation. Masked positions contribute zero to the normalization denominator.
+The [segmented transformer benchmark](compute/neurogrid/proofs/segmented.py) uses one small decoder layer with four hidden lanes, two query heads, one KV head, an eight-lane SiLU feed-forward network, and a four-token vocabulary. Its weights are deterministically initialized for the test. It proves the complete token-to-token calculation for this model, including embedding, both layer RMSNorms, projections, rotary attention, causal masking, KV updates, residuals, SiLU, final RMSNorm, logits and first-index greedy selection. Two prompt tokens start the trace. The first generated token is then embedded as the next input to generate the second reply token. The fixed-point circuits keep 18 fractional bits at floating-tensor boundaries. Attention applies the `1/128` scale and explicit row-max subtraction before exponentiation. Masked positions contribute zero to the normalization denominator.
 
-The trusted manifest pins the full schedule, model and parameter commitments, verification artifacts and SRS. A proof's public instances include the input and output tensor commitments and a context commitment derived from the request nonce, manifest fingerprint and the scheduled layer, token position, operation and edges. The context is constrained as both an input and an output. The verifier reconstructs all input commitments from previously verified outputs and trusted constants. It also checks the claimed reply tokens against the proved greedy outputs. The prover hands exact field encodings to the next segment and checks edge shape, element type and fixed-point scale during preparation. This avoids a floating-point conversion at the boundary. The benchmark uses unsalted commitments and a local test SRS. [Independent verifier](compute/proofs/segmented_receipt.py) · [Circuit templates and schedule](compute/proofs/segmented_model.py)
+The trusted manifest pins the full schedule, model and parameter commitments, verification artifacts and SRS. A proof's public instances include the input and output tensor commitments and a context commitment derived from the request nonce, manifest fingerprint and the scheduled layer, token position, operation and edges. The context is constrained as both an input and an output. The verifier reconstructs all input commitments from previously verified outputs and trusted constants. It also checks the claimed reply tokens against the proved greedy outputs. The prover hands exact field encodings to the next segment and checks edge shape, element type and fixed-point scale during preparation. This avoids a floating-point conversion at the boundary. The benchmark uses unsalted commitments and a local test SRS. [Independent verifier](compute/neurogrid/proofs/receipts.py) · [Circuit templates and schedule](compute/neurogrid/models/small.py)
 
 Proving processes one segment at a time, removes each temporary witness after use and releases intermediate tensors after their last scheduled consumer. Eight key pairs served all 54 proofs in each run and were reused for a second request. The matrix template takes weights as inputs and the verifier pins the expected commitments. It splits output lanes into tiles while keeping the full reduction dimension in each tile, so quantization happens after the complete dot product. The eight proving keys occupy 1,162,173,208 bytes on disk. The independent verifier directory contains verification artifacts and the request and bundle, without model files, compiled circuits, proving keys or witnesses.
 
-The [Granite partitioner](compute/proofs/granite_segments.py) uses the existing corrected decode export for revision `a7042144125ce5ae64f89610e8289647fc000b9a`. It checks projection shapes and records the graph fingerprint, cuts and tile ranges. The layer-0 position-6 graph has 120 nodes in 15 groups and 4,992 eight-row projection tiles. Executing the partition against the original FP32 graph exercised every cut and row join. Maximum errors were 0.00000572 in the residual output, 0.00000954 in the key cache and 0.00000167 in the value cache. A separate Q18 proof for the first eight rows of the real query projection used all 4,096 columns and independently verified against trusted public tensor openings. A complete segmented Granite proof and Q18 parity across all Granite segment boundaries remain to be demonstrated.
+The [Granite partitioner](compute/neurogrid/benchmarks/granite_segments.py) uses the existing corrected decode export for revision `a7042144125ce5ae64f89610e8289647fc000b9a`. It checks projection shapes and records the graph fingerprint, cuts and tile ranges. The layer-0 position-6 graph has 120 nodes in 15 groups and 4,992 eight-row projection tiles. Executing the partition against the original FP32 graph exercised every cut and row join. Maximum errors were 0.00000572 in the residual output, 0.00000954 in the key cache and 0.00000167 in the value cache. A separate Q18 proof for the first eight rows of the real query projection used all 4,096 columns and independently verified against trusted public tensor openings. A complete segmented Granite proof and Q18 parity across all Granite segment boundaries remain to be demonstrated.
 
 #### Allocation profile
 
@@ -218,26 +141,26 @@ Measured on Windows 11, Ryzen 5 5600X, Python 3.12 and EZKL 23.0.5 with four Ray
 
 Both fully verified small-model requests and the tested Granite tile fit under the 8–12 GiB ceiling. The complete Granite layer has no measured memory peak. At the measured tile time, the 4,480 tiles with the tested 4,096-column shape alone would take about 53 hours sequentially. That is an extrapolation and excludes the wider down-projection, nonlinear segments, setup and verification. This diagnostic tile's serialized proof includes public weight openings, which would also be expensive to transmit at layer scale.
 
-Run with `compute` on `PYTHONPATH` and the proof dependencies listed above. Use a new scratch directory for setup outputs. Copy only `public/`, the two verifier source files, the request and the bundle to a separate directory for independent verification.
+Install the Python proof extra for proving and use a new scratch directory for setup. A separate installation with the verification extra needs only trusted public artifacts, the issued request and the proof bundle.
 
 ```sh
-python compute/proofs/segmented_benchmark.py prepare /path/to/scratch
-python compute/proofs/segmented_benchmark.py setup /path/to/scratch
-python compute/proofs/segmented_benchmark.py issue /path/to/scratch /path/to/scratch/request.json 0 1
-python compute/proofs/segmented_benchmark.py prove /path/to/scratch /path/to/scratch/bundle.json /path/to/scratch/request.json
-python segmented_receipt.py public request.json bundle.json
-python compute/proofs/granite_segments.py /path/to/centered-export /path/to/new/partition --check-partition --trial-rows 8 --tile-srs /path/to/kzg16.srs
+neurogrid benchmark segmented prepare /path/to/scratch
+neurogrid benchmark segmented setup /path/to/scratch
+neurogrid benchmark segmented issue /path/to/scratch /path/to/scratch/request.json 0 1
+neurogrid benchmark segmented prove /path/to/scratch /path/to/scratch/bundle.json /path/to/scratch/request.json
+neurogrid verify public request.json bundle.json
+neurogrid benchmark granite-segments /path/to/centered-export /path/to/new/partition --check-partition --trial-rows 8 --tile-srs /path/to/kzg16.srs
 ```
 
-For integration tests, set `NEUROGRID_SEGMENTED_CASE` to the benchmark scratch directory and run `python -m unittest discover -s compute/proofs -p 'test_*.py' -v`. The tests reject missing segments, substituted weights, changed cache commitments, altered reply tokens, relabeled requests and spliced proofs. To test splicing with a genuine second bundle, issue and prove `request-b.json` and `bundle-b.json` in the same directory with prompt `2 3`. Multi-layer aggregation remains gated on generating and independently verifying a complete segmented Granite layer.
+For integration tests, set `NEUROGRID_SEGMENTED_CASE` to the benchmark scratch directory and run `python -m unittest discover -s compute/tests -p 'test_*.py' -v`. The tests reject missing segments, substituted weights, changed cache commitments, altered reply tokens, relabeled requests and spliced proofs. To test splicing with a genuine second bundle, issue and prove `request-b.json` and `bundle-b.json` in the same directory with prompt `2 3`. Multi-layer aggregation remains gated on generating and independently verifying a complete segmented Granite layer.
 
 #### Hybrid tensor proofs
 
-The [GKR adapter](compute/proofs/tensor_gkr/main.go) uses gnark v0.16.5 for matrix-vector and matrix-matrix products. The SHA-512 Fiat–Shamir transcript derives row and column evaluation points after the raw accumulator tensor is committed. The adapter folds the opened input tensors along those axes and uses gnark GKR to prove the pointwise products over the reduction dimension. The verifier checks the returned evaluation claims against the opened tensors and checks that the opened products sum to the challenged accumulator evaluation. It performs linear scans of the opened inputs and outputs and never reruns the matrix product. Small signed integer lane bounds ensure products and accumulators have their intended integer interpretation over BN254. The published gnark audit covers an older revision. The adapter and bridge need their own review. [gnark releases](https://github.com/Consensys-Incorporated/gnark/releases) · [Historical gnark audit](https://leastauthority.com/wp-content/uploads/2024/12/Least-Authority-Consensys-Linea-ProverCryptography-Phase-1-Initial-Audit-Report.pdf)
+The [GKR adapter](compute/native/tensor_gkr/main.go) uses gnark v0.16.5 for matrix-vector and matrix-matrix products. The SHA-512 Fiat–Shamir transcript derives row and column evaluation points after the raw accumulator tensor is committed. The adapter folds the opened input tensors along those axes and uses gnark GKR to prove the pointwise products over the reduction dimension. The verifier checks the returned evaluation claims against the opened tensors and checks that the opened products sum to the challenged accumulator evaluation. It performs linear scans of the opened inputs and outputs and never reruns the matrix product. Small signed integer lane bounds ensure products and accumulators have their intended integer interpretation over BN254. The published gnark audit covers an older revision. The adapter and bridge need their own review. [gnark releases](https://github.com/Consensys-Incorporated/gnark/releases) · [Historical gnark audit](https://leastauthority.com/wp-content/uploads/2024/12/Least-Authority-Consensys-Linea-ProverCryptography-Phase-1-Initial-Audit-Report.pdf)
 
-The [Halo2 bridge](compute/proofs/hybrid_bridge.py) proves Q36-to-Q18 rescaling after the whole dot product. It constrains the sign, nonnegative magnitudes, the signed rounding equation and an 18-bit remainder, including ties away from zero. The verifier checks that its exact accumulator opening comes from the verified GKR statement and that the rounded tensor and tile offsets match the Halo2 instances. The two proofs bind to the same independently supplied model, tensor digests, prompt digest, request nonce, operation, layer, token position and cache commitments. The Granite diagnostic scope labels a projection and contains synthetic cache anchors. The full query projection fixture pins the centered export by its graph digest and verifies that its first eight Q18 rows match the existing Halo2 fixture. It proves a projection of the independently supplied normalized activation. Tokenization, production model identity across other operators, and cache transitions are outside that Granite statement.
+The [Halo2 bridge](compute/neurogrid/proofs/rescale.py) proves Q36-to-Q18 rescaling after the whole dot product. It constrains the sign, nonnegative magnitudes, the signed rounding equation and an 18-bit remainder, including ties away from zero. The verifier checks that its exact accumulator opening comes from the verified GKR statement and that the rounded tensor and tile offsets match the Halo2 instances. The two proofs bind to the same independently supplied model, tensor digests, prompt digest, request nonce, operation, layer, token position and cache commitments. The Granite diagnostic scope labels a projection and contains synthetic cache anchors. The full query projection fixture pins the centered export by its graph digest and verifies that its first eight Q18 rows match the existing Halo2 fixture. It proves a projection of the independently supplied normalized activation. Tokenization, production model identity across other operators, and cache transitions are outside that Granite statement.
 
-In the [small hybrid transformer](compute/proofs/segmented_hybrid.py), the verifier re-commits each public projection opening with the existing Poseidon encoder. The input must open the previously verified tensor edge and the weights must open the trusted model constant. The rescaled output becomes the exact Poseidon edge used by the next circuit. The latest key/value edge commitments enter every projection scope, and the existing Halo2 attention circuit proves each cache update together with rotation, centered `1/128` softmax and masking. Attention's small internal products remain in Halo2. The full response also proves prompt-token embedding, all nonlinear work, first-index greedy token selection and the use of the first generated token to produce the second. This experimental mode discloses the projection openings. The original all-Halo2 baseline continues using its existing commitments and verifier.
+In the [small hybrid transformer](compute/neurogrid/proofs/hybrid_response.py), the verifier re-commits each public projection opening with the existing Poseidon encoder. The input must open the previously verified tensor edge and the weights must open the trusted model constant. The rescaled output becomes the exact Poseidon edge used by the next circuit. The latest key/value edge commitments enter every projection scope, and the existing Halo2 attention circuit proves each cache update together with rotation, centered `1/128` softmax and masking. Attention's small internal products remain in Halo2. The full response also proves prompt-token embedding, all nonlinear work, first-index greedy token selection and the use of the first generated token to produce the second. This experimental mode discloses the projection openings. The original all-Halo2 baseline continues using its existing commitments and verifier.
 
 The implementation review covered DeepProve's inference graph and operator-proof integration, zkLLM's specialized attention and tensor lookups, zkMatrix's batched committed-matrix openings, and Remainder's matrix sumcheck and Hyrax opening support. The November 2026 *Ziv Meets Sumcheck* paper separates exact accumulation from certified rounding for floating-point arithmetic. NeuroGrid applies a single rounding after a bounded integer Q36 accumulation, using its existing Q18 arithmetic. A multilinear PCS such as Hyrax or Dory would remove the need to send full projection openings. It would also need a proof that its openings and the Halo2 tensor commitments encode the same values. The current public-opening proof is a benchmark for correctness and execution cost. [DeepProve source](https://github.com/Lagrange-Labs/deep-prove) · [zkLLM artifact](https://github.com/jvhs0706/zkllm-ccs2024) · [zkMatrix](https://eprint.iacr.org/2024/161) · [Remainder](https://github.com/worldcoin/Remainder_CE) · [Ziv Meets Sumcheck](https://arxiv.org/html/2611.29188) · [Dory implementation notes](https://jolt.a16zcrypto.com/how/dory.html)
 
@@ -258,27 +181,27 @@ The eight outputs match the original Halo2 fixture exactly. GKR alone took 0.165
 Run the following from the repository root. The eight-row tile harness above produces the input baseline directory. Use `--full-export centered-export` and bridge width 256 for the full query projection, or `--batched` to exercise two rows. The verifier takes its scope and verification artifacts from an independently trusted directory.
 
 ```sh
-(cd compute/proofs/tensor_gkr && GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -trimpath -o /path/to/tensor.wasm .)
-python compute/proofs/hybrid_benchmark.py case ref-tile /path/to/halo2-tile
-python compute/proofs/hybrid_benchmark.py setup bridge8 --width 8
-python compute/proofs/hybrid_benchmark.py profile ref-tile tensor.wasm
-python compute/proofs/hybrid_benchmark.py prove ref-tile tensor.wasm bridge8
-python compute/proofs/hybrid_benchmark.py verify ref-tile tensor.wasm /path/to/bridge-public /path/to/issued-scope.json
-python compute/proofs/segmented_hybrid.py prove /path/to/small-setup request.json small-response tensor.wasm bridge8 --tokens 2
-python compute/proofs/segmented_hybrid.py verify /path/to/small-public request.json small-response tensor.wasm /path/to/bridge-public --tokens 2
+(cd compute/native/tensor_gkr && GOOS=wasip1 GOARCH=wasm CGO_ENABLED=0 go build -trimpath -o /path/to/tensor.wasm .)
+neurogrid benchmark hybrid-projection case ref-tile /path/to/halo2-tile
+neurogrid benchmark hybrid-projection setup bridge8 --width 8
+neurogrid benchmark hybrid-projection profile ref-tile tensor.wasm
+neurogrid benchmark hybrid-projection prove ref-tile tensor.wasm bridge8
+neurogrid benchmark hybrid-projection verify ref-tile tensor.wasm /path/to/bridge-public /path/to/issued-scope.json
+neurogrid benchmark small-hybrid prove /path/to/small-setup request.json small-response tensor.wasm bridge8 --tokens 2
+neurogrid benchmark small-hybrid verify /path/to/small-public request.json small-response tensor.wasm /path/to/bridge-public --tokens 2
 ```
 
 To replay the real projection regressions, place `tensor.wasm`, `bridge8`, and two independently proved eight-row cases named `ref-tile` and `ref-tile-alt` under one fixture directory, then set `NEUROGRID_HYBRID_FIXTURES` to that directory. The two tile bundles use the same tensors and keys with different request nonces. To test the response chain, set `NEUROGRID_HYBRID_RESPONSES` to the directory containing `small-one`, `small-two`, and `small-isolated`. The last directory contains the separately trusted `model-public`, `bridge-public`, `tensor.wasm`, and the independently issued `request.json` and `request-b.json`. Run the Python proof test discovery above. It checks the segmented baseline, both hybrid proofs, and rejection of altered weights, cache anchors, transcript scalars, rescaled outputs and spliced proofs.
 
-The Windows working tree based on `f8cb824` passed all 21 Python proof tests with the real fixtures. The 14 compute tests passed with `NEUROGRID_MODEL` set to the pinned checkpoint, including BF16 partition parity across three generated tokens for each of three prompts. `npm run validate` passed all 25 tests. `npm run test:proof` and `npm run test:granite-proof` passed 7 and 3 tests respectively, the latter with the real checkpoint-derived `NEUROGRID_PROJECTION_SAMPLE`. The BF16 checks are inference regressions and exercise the existing reference verifier.
+Before the research-only refactor, the Windows working tree based on `f8cb824` passed all 21 Python proof tests with the real fixtures. The 14 compute tests passed with `NEUROGRID_MODEL` set to the pinned checkpoint, including BF16 partition parity across three generated tokens for each of three prompts. The original website's 25 TypeScript unit tests passed there. The Kimchi baselines passed seven small-model tests and three projection tests with the checkpoint-derived `NEUROGRID_PROJECTION_SAMPLE`. The BF16 checks are inference regressions and exercise the existing reference verifier.
 
 #### Compact Granite query projection
 
-The [compact prover](compute/proofs/tensor_gkr/compact.go) keeps the public-opening GKR/Halo2 path as a regression baseline. It supports a single activation against a power-of-two projection. The model installer checks the pinned Q18 weight bytes and generates one G1 commitment per output column with gnark-crypto. These commitments are reused for later requests. Issuance checks the activation against the trusted scope and commits to it in smaller, rectangular blocks. The model revision, tensor order, dimensions, scale, weight fingerprint, request, position, layer, operation, and cache anchors enter the statement. Matrix storage is row-major with signed little-endian Q18 integers. The one-time verification install contains 132,205 bytes of points, model metadata and the Groth16 verification key. The verifier never reads the weight matrix.
+The [compact prover](compute/native/tensor_gkr/compact.go) keeps the public-opening GKR/Halo2 path as a regression baseline. It supports a single activation against a power-of-two projection. The model installer checks the pinned Q18 weight bytes and generates one G1 commitment per output column with gnark-crypto. These commitments are reused for later requests. Issuance checks the activation against the trusted scope and commits to it in smaller, rectangular blocks. The model revision, tensor order, dimensions, scale, weight fingerprint, request, position, layer, operation, and cache anchors enter the statement. Matrix storage is row-major with signed little-endian Q18 integers. The one-time verification install contains 132,205 bytes of points, model metadata and the Groth16 verification key. The verifier never reads the weight matrix.
 
 Remainder's Hyrax documentation describes authenticating a row fold by comparing its Pedersen commitment with the same linear combination of the installed commitments. NeuroGrid uses that construction without blinding for this public-model diagnostic. The proof supplies one authenticated 4,096-scalar weight fold and small openings for each required activation and product claim. A separate opening at the all-half point binds the sum of products. DeepProve's HyperKZG implementation offers smaller proofs at the cost of a pairing-based polynomial setup. Remainder's blinded Hyrax implementation can hide evaluations. Gnark supplies the GKR and curve operations used here, and its native KZG API commits to univariate polynomials. This adapter uses neither the Remainder nor DeepProve code. A fold can disclose linear information about the tensor, so the current projection protocol makes no privacy claim. [Remainder Hyrax](https://worldcoin.github.io/remainder-documentation/hyrax/hyrax_pcs.html) · [DeepProve PCS code](https://github.com/Lagrange-Labs/dp-crypto) · [gnark](https://github.com/Consensys-Incorporated/gnark)
 
-The [batched rescaling proof](compute/proofs/tensor_gkr/compact_rescale.go) replaces sixteen Halo2 proofs with one Groth16 proof. Each accumulator magnitude has 52 constrained bits. The upper bits give the floor quotient and bit 17 gives the rounding carry. Applying the constrained sign produces nearest rounding with ties away from zero. This decomposition enforces the same bounded remainder as an explicit quotient-remainder equation. Packed, domain-separated Poseidon2 commitments bind the full raw and rounded tensors. The external transcript commits to both before deriving the raw multilinear evaluation point. The same evaluation is checked by Groth16 and by the authenticated GKR product sum. The batch also accepts the rounded tensor as an optional output opening and checks all 4,096 values against the proved commitment. The 164-byte rescaling proof uses a local circuit-specific trusted setup. Fast loading authenticates the locally generated proving key against a separately supplied install-time pin, while proofs and verification keys use checked decoders.
+The [batched rescaling proof](compute/native/tensor_gkr/compact_rescale.go) replaces sixteen Halo2 proofs with one Groth16 proof. Each accumulator magnitude has 52 constrained bits. The upper bits give the floor quotient and bit 17 gives the rounding carry. Applying the constrained sign produces nearest rounding with ties away from zero. This decomposition enforces the same bounded remainder as an explicit quotient-remainder equation. Packed, domain-separated Poseidon2 commitments bind the full raw and rounded tensors. The external transcript commits to both before deriving the raw multilinear evaluation point. The same evaluation is checked by Groth16 and by the authenticated GKR product sum. The batch also accepts the rounded tensor as an optional output opening and checks all 4,096 values against the proved commitment. The 164-byte rescaling proof uses a local circuit-specific trusted setup. Fast loading authenticates the locally generated proving key against a separately supplied install-time pin, while proofs and verification keys use checked decoders.
 
 The rescaling review considered batched quotient-remainder constraints, gnark's committed range checks, LogUp-GKR and zkLLM's tensor lookups. Using the high and low bits of a single decomposition avoids a separate quotient range check and remainder table. This is the implemented path for projection rescaling. A committed lookup still has a role for nonlinear functions such as the centered exponential, where the arithmetic relation differs. [gnark range check](https://github.com/Consensys-Incorporated/gnark/tree/v0.16.5/std/rangecheck) · [LogUp-GKR](https://eprint.iacr.org/2023/1284) · [zkLLM](https://arxiv.org/abs/2404.16109)
 
@@ -306,57 +229,20 @@ The same path independently verified the real 4,096 × 1,024 key and value proje
 
 Channel batching and six-thread execution were measured here. The host has a 4 GiB GTX 1650 SUPER and no CUDA toolkit in the test environment. Gnark's ICICLE backend was reviewed for Groth16, with GPU measurements pending. Recursive aggregation would need to verify the GKR openings, the rescaling proof and the state links together. [gnark ICICLE backend](https://github.com/Consensys-Incorporated/gnark/blob/master/backend/accelerated/icicle/doc.go)
 
-Build the native binary in `compute/proofs/tensor_gkr` with `go build -trimpath`. The [benchmark driver](compute/proofs/compact_benchmark.py) uses the previously prepared full-projection fixture. Run `setup` in a trusted environment, issue a new scope for each request and retain `model/public` independently from the prover.
+Build the native binary in `compute/native/tensor_gkr` with `go build -trimpath`. The [benchmark driver](compute/neurogrid/proofs/compact.py) uses the previously prepared full-projection fixture. Run `setup` in a trusted environment, issue a new scope for each request and retain `model/public` independently from the prover.
 
 ```sh
-python compute/proofs/compact_benchmark.py setup ./tensor full-projection compact-model
-python compute/proofs/compact_benchmark.py issue ./tensor compact-model/public full-projection request-a
-python compute/proofs/compact_benchmark.py stage compact-model full-projection request-a job-a
-python compute/proofs/compact_benchmark.py prove ./tensor job-a --key-pin-file compact-model/rescale.pk.sha256
-python compute/proofs/compact_benchmark.py verify ./tensor compact-model/public request-a job-a/projection.proof
+neurogrid benchmark compact setup ./tensor full-projection compact-model
+neurogrid benchmark compact issue ./tensor compact-model/public full-projection request-a
+neurogrid benchmark compact stage compact-model full-projection request-a job-a
+neurogrid benchmark compact prove ./tensor job-a --key-pin-file compact-model/rescale.pk.sha256
+neurogrid benchmark compact verify ./tensor compact-model/public request-a job-a/projection.proof
 ```
 
 Pass several staged job directories to `prove` to measure warm reuse. Pass `--output` to `verify` to check a delivered Q18 tensor. For key and value fixtures, add `--projection k` or `--projection v` to the legacy fixture builder with the pinned full export. Set `NEUROGRID_COMPACT_CASE` to a fixture root containing `setup-full`, `full-pinned`, `request-a`, `request-b`, `job-a` and `job-b`, and set `NEUROGRID_COMPACT_BIN` to the compiled binary. All 27 Python proof tests, 35 TypeScript tests and 14 compute tests passed, including pinned BF16 inference parity for the compute tests. Proof tests cover opening forgery, commitment substitution, key-pin mismatch, output mutation and a cross-request rescaling splice. The Go tests also reject wrong signed ties, out-of-range remainder relations and field wraparound.
 
-#### Local inference proof demo
+## Complete Granite layer milestone
 
-The loopback site uses the original segmented small-transformer prover. The browser generates the request nonce and loads public artifacts by digest from its pinned model manifest. A dedicated Web Worker reconstructs every Halo2 instance, checks all 54 SHPLONK proofs with the WASM build of EZKL 23.0.5, and validates the opened response tokens. The page displays a reply only after the browser's check. The server still performs its own check and provides the downloadable bundle for independent command-line verification. Chromium accepted a genuine generated response, then rejected an altered proof even when the simulated server reported success. This check assumes the browser is running the trusted verifier build.
+Finish layer zero at one real decode position. The statement must bind the checkpoint and numerical policy, normalized activation, position, incoming KV root, and outgoing state. The Q/K/V and output projections need to compose with rotary embeddings, causal masking, centered softmax, value accumulation, normalization, residuals and the gated MLP. The verifier must reject reordered or substituted operations and prove the actual cache transition. Use the real layer export and existing numerical regressions to compare emitted Q18 tensors. Benchmark end-to-end proving, verification, peak memory and payload before moving to a token forward pass.
 
-Build the browser artifacts with Rust nightly `2025-12-01`, its `wasm32-unknown-unknown` target and `wasm-bindgen-cli 0.2.108`. Use the pinned [EZKL 23.0.5 checkout](https://github.com/zkonduit/ezkl/tree/534ff3e6c13d4c2c1aca2358910d62dac466d3cc) and run the following from the NeuroGrid repository. The browser code defaults to the existing benchmark's pinned model manifest. For a separately generated setup, obtain its trusted canonical manifest SHA-256 out of band and open the demo with `?manifest=<trusted-fingerprint>`.
-
-```sh
-python compute/proofs/build_browser_verifier.py /path/to/ezkl-checkout /path/to/browser-assets
-python compute/proofs/segmented_demo.py --root /path/to/small-setup --browser-assets /path/to/browser-assets
-playwright-cli open http://127.0.0.1:8787
-playwright-cli run-code --filename compute/proofs/web_demo/test-browser-verification.js
-```
-
-After extracting a downloaded bundle, run `python segmented_receipt.py public request.json bundle.json` with EZKL 23.0.5 and a trusted copy of the model manifest and request.
-
-## Contributor clients and startup
-
-The target desktop app offers a persistent **Settings → Compute limits** screen and tray entry, saves changes before the first compute run, restores them on reopen, and shows effective limits and node status. Its login-only tray UI can supervise a separately installed background worker. The headless CLI exposes the same saved settings, status, and controls through a validated local configuration and authenticated service interface.
-
-The Windows Service Control Manager and Linux systemd supervise enrolled worker processes at boot. They reuse settings, identity, and model cache before a user signs in, then reconnect when networking is ready. An owner can limit CPU, duty cycle, GPU memory, concurrent sessions, and layer capacity, and retrieve those limits in either interface. Settings and ownership apply whether a process is started at boot or manually. The [handoff](docs/next-feature.md#4-give-contributors-durable-controls) specifies persistence, migration, service recovery, and OS-specific tests. [Windows service startup](https://learn.microsoft.com/en-us/windows/win32/services/service-startup) · [systemd service documentation](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html)
-
-## Credits and accounting
-
-A confirmed purchase issues prepaid service credits. The app quotes and holds a maximum automatically. The current rate charges six subunits per evaluated model position plus one subunit per 600 causal attention pairs, rounded up. A credit has 1,000 subunits. Prefill evaluates the formatted conversation and predicts the first token. Each further prediction adds one position. A Quick reply tops out at 2 credits. The coordinator settles only complete, verified replies. It charges the completed logical sequence once across retries, releases any unused hold, pays a portion to the workers, and retires the platform share. An unsuccessful job returns the full hold. Requests keep their quoted rate across updates. Balances, job state, and ledger entries change in one transaction. [Stripe Checkout fulfillment](https://docs.stripe.com/checkout/fulfillment)
-
-On an isolated Windows coordinator, `compute/tests/live_check.py --france-only --failover` ran the pinned Granite revision with the local reference verifier. After partition 1 was replaced, Granite generated eight tokens in 92 seconds and replied “The capital of France is Paris.” The coordinator charged 0.175 credits once against a 0.517-credit hold, returned 0.342, and recorded one settlement after a repeated submission. The concurrent-holds harness used enrolled fixture workers on the same coordinator. It admitted two holds, rejected two overspends and recorded one full refund per accepted hold after the workers were removed.
-
-## Granite candidate
-
-| Area | Implemented today |
-| --- | --- |
-| Web and control | React, TypeScript, Hono, DeepSpace auth and RecordRoom, and one SQLite-backed coordinator with a bounded concurrent queue |
-| Model | Pinned IBM Granite 4.2 8B, four ten-layer BF16 CPU partitions, worker-local KV caches, and an operator reference |
-| Chat | Completed turns provide context. The verifier formats inputs with the pinned tokenizer before the coordinator quotes and reserves. |
-| Worker selection | The coordinator pins a complete route using fresh relay-path RTT, verified execution metrics, queue load, failure history, and a Cloudflare location hint. |
-| Contributor settings | Desktop and CLI share a durable profile. SCM and Linux beta systemd installers provision separate service identities and caches. Unattended restart tests remain pending. |
-| Credits | The versioned ledger preserves existing balances and issues new credits after a paid Checkout event. Settlement distributes the reward share and retires the platform share. |
-| Trust | The operator recomputes the numerical result. The public ledger verifies accounting and the integrity of recorded digests. Hardware-backed receipt validation remains a production gate. |
-
-Use the [README and test runbook](README.md), [installer instructions](packaging/INSTALL.md), and [coordinator source](src/neurogrid/coordinator.ts) to reproduce the candidate. Use the [required test gates](docs/next-feature.md#8-mandatory-implementation-and-release-tests) to assess release readiness.
-
-On November 25, 2026, four Windows headless workers loaded the pinned Granite revision and registered all four partitions with the [hosted coordinator](https://neurogrid.app.space/network). This check used the existing test account pool and the source CLI with a 20-second idle poll interval. The coordinator reported its reference verifier offline and ledger height 30 before and after enrollment. This established live worker connectivity. Serving a request still requires a compatible verifier.
+Parallel execution and reusable commitments are available for the compact projection. GPU acceleration, nonlinear lookup optimization and recursive aggregation are research tasks. Any aggregate statement must cover the constituent tensor openings and authenticated state transitions.
