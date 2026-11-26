@@ -1,7 +1,6 @@
 """Prepare, prove and independently verify the compact Granite projection."""
 
 import argparse
-import ctypes
 import json
 import os
 from pathlib import Path
@@ -10,6 +9,8 @@ import subprocess
 from tempfile import TemporaryDirectory
 import time
 
+from benchmark_metrics import peak_child
+
 
 MODEL = ("model.json", "model.commit")
 REQUEST = ("scope.json", "activation.commit")
@@ -17,24 +18,6 @@ PROVING_KEY = ("rescale.r1cs", "rescale.pk")
 KEY_PIN = "rescale.pk.sha256"
 OPENINGS = ("left.bin", "right.bin", "raw.bin", "rounded.bin")
 RECEIPT = "projection.proof"
-
-
-def peak_child(process: subprocess.Popen) -> dict:
-    if os.name != "nt":
-        return {"peak_resident_bytes": None, "peak_commit_bytes": None}
-    from ctypes import wintypes
-
-    class Counters(ctypes.Structure):
-        _fields_ = [("size", wintypes.DWORD), ("faults", wintypes.DWORD), ("values", ctypes.c_size_t * 8)]
-
-    info = Counters()
-    info.size = ctypes.sizeof(info)
-    get_memory = ctypes.windll.psapi.GetProcessMemoryInfo
-    get_memory.argtypes = (wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD)
-    get_memory.restype = wintypes.BOOL
-    if get_memory(int(process._handle), ctypes.byref(info), info.size):
-        return {"peak_resident_bytes": info.values[0], "peak_commit_bytes": info.values[-1]}
-    return {"peak_resident_bytes": None, "peak_commit_bytes": None}
 
 
 def command(binary: Path, operation: str, *jobs: Path, key_pin: str | None = None) -> list[dict]:

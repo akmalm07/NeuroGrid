@@ -1,7 +1,6 @@
 """Benchmark and independently verify the public-opening Granite GKR/Halo2 path."""
 
 import argparse
-import ctypes
 from hashlib import sha256
 import json
 import os
@@ -12,6 +11,7 @@ import subprocess
 from tempfile import TemporaryDirectory
 import time
 
+from benchmark_metrics import peak_child
 from granite_layer_proof import peak_memory, read_json
 from hybrid_bridge import SCALE, prepare, run
 from segmented_receipt import digest_file, write_json
@@ -81,31 +81,13 @@ def setup_case(root: Path, baseline: Path, export: Path | None, *, batched: bool
                       "seconds": time.perf_counter() - start, **peak_memory()}), flush=True)
 
 
-def node_peak_commit(process: subprocess.Popen) -> int | None:
-    if os.name != "nt":
-        return None
-    from ctypes import wintypes
-
-    class Counters(ctypes.Structure):
-        _fields_ = [("size", wintypes.DWORD), ("faults", wintypes.DWORD), ("values", ctypes.c_size_t * 8)]
-
-    info = Counters()
-    info.size = ctypes.sizeof(info)
-    get_memory = ctypes.windll.psapi.GetProcessMemoryInfo
-    get_memory.argtypes = (wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD)
-    get_memory.restype = wintypes.BOOL
-    if get_memory(int(process._handle), ctypes.byref(info), info.size):
-        return info.values[-1]
-    return None
-
-
 def gkr(job: Path, wasm: Path, *operations: str) -> str:
     runner = Path(__file__).with_name("tensor_gkr") / "wasi.mjs"
     start = time.perf_counter()
     with subprocess.Popen(["node", str(runner), str(wasm), str(job), *operations],
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
         output, error = process.communicate()
-        commit = node_peak_commit(process)
+        memory = peak_child(process)
     if process.returncode:
         raise ValueError(error.strip().splitlines()[-1] if error.strip() else "GKR process failed")
     statements = set()
@@ -116,7 +98,7 @@ def gkr(job: Path, wasm: Path, *operations: str) -> str:
         print(json.dumps(item), flush=True)
     if len(statements) != 1:
         raise ValueError("GKR did not return a unique statement")
-    print(json.dumps({"phase": "node_process", "seconds": time.perf_counter() - start, "peak_commit_bytes": commit}),
+    print(json.dumps({"phase": "node_process", "seconds": time.perf_counter() - start, **memory}),
           flush=True)
     return statements.pop()
 

@@ -42,10 +42,6 @@ def peak_memory() -> dict[str, int | None]:
             "peak_commit_bytes": None}
 
 
-def peak_resident_bytes() -> int:
-    return int(peak_memory()["peak_resident_bytes"] or 0)
-
-
 def public_fields(settings: dict, claim: dict) -> list[str]:
     args = settings["run_args"]
     if (args["input_visibility"], args["output_visibility"], args["param_visibility"], args["check_mode"]) != (
