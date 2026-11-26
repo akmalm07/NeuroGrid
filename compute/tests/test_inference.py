@@ -9,9 +9,10 @@ import torch
 from transformers import AutoModelForCausalLM, GraniteConfig, GraniteForCausalLM
 from transformers.models.granite.modeling_granite import GraniteRotaryEmbedding
 
-from neurogrid_node import WINDOW
-from neurogrid_node.model import (
-    CacheMiss, Verifier, checkpoint, configure_cpu, prepare_context, unpack, verified_file, weight_reader,
+from neurogrid.models.manifest import WINDOW
+from neurogrid.models.granite import (
+    CacheMiss, Granite, checkpoint, configure_cpu, matches_activation, tokenize_prompt, unpack, verified_file,
+    weight_reader,
 )
 
 
@@ -22,7 +23,7 @@ class InferenceTest(unittest.TestCase):
     def setUpClass(cls):
         configure_cpu(2)
         cls.path = Path(os.environ["NEUROGRID_MODEL"]) if "NEUROGRID_MODEL" in os.environ else checkpoint()
-        cls.verifier = Verifier(cls.path)
+        cls.model = Granite(cls.path)
 
     @torch.inference_mode()
     def test_greedy_tokens_match_local_inference(self):
@@ -43,46 +44,37 @@ class InferenceTest(unittest.TestCase):
             ).eval()
         prompts = ("What is the capital of France?", "What is 2 + 2?", "Summarize why pollinators matter.")
         for prompt in prompts:
-            tokens = prepare_context(self.verifier.tokenizer, [{"role": "user", "content": prompt}])["tokens"]
+            tokens = tokenize_prompt(self.model.tokenizer, prompt)
             self.assertLessEqual(len(tokens), WINDOW)
             started = time.perf_counter()
-            state, position = None, 0
-            for _ in range(3):
-                inputs = {"tokens": tokens}
-                for partition in self.verifier.partitions:
-                    inputs = partition.run(inputs, len(tokens), position=position, job="parity")
+            reply = self.model.generate(prompt, max_tokens=3)
+            self.assertEqual(reply["execution"], "bf16-reference")
+            self.assertEqual(len(reply["tokens"]), 3)
+            state = None
+            for token in reply["tokens"]:
                 result = full(torch.tensor([tokens]), use_cache=True, past_key_values=state)
                 state = result.past_key_values
                 expected = int(result.logits[0, -1].argmax())
-                self.assertEqual(inputs["token"], expected)
-                position += len(tokens)
+                self.assertEqual(token, expected)
                 tokens = [expected]
             print(f"\n{prompt!r} three matching BF16 tokens in {time.perf_counter() - started:.2f}s")
 
     def test_verifier_rejects_invalid_activation_and_missing_kv_state(self):
         payload = {"tokens": [1, 42]}
-        work = {"id": "verification", "kind": "verify", "input": payload, "stage": 0, "length": 2,
-                "job": "verification", "epoch": 0, "position": 0, "emit": True}
-        expected = self.verifier.partitions[0].run(payload, 2)
-        self.assertTrue(self.verifier.process({**work, "candidate": expected})["valid"])
-        wrong = {"tensor": "A" * len(expected["tensor"])}
-        self.assertFalse(self.verifier.process({**work, "candidate": wrong})["valid"])
+        expected = self.model.partitions[0].run(payload, 2)["tensor"]
+        self.assertTrue(matches_activation(expected, expected, 2))
+        self.assertFalse(matches_activation("A" * len(expected), expected, 2))
         with self.assertRaises(ValueError):
             unpack("invalid", 2)
         with self.assertRaises(CacheMiss):
-            self.verifier.partitions[0].run({"tokens": [42]}, 1, position=2, job="missing")
+            self.model.partitions[0].run({"tokens": [42]}, 1, position=2, job="missing")
 
-    def test_context_preserves_recent_roles_and_trims_old_pairs(self):
-        turns = [
-            {"role": "user", "content": "Older" + " very" * 300},
-            {"role": "assistant", "content": "Acknowledged the old turn."},
-            {"role": "user", "content": "My favorite city is Kyoto."},
-            {"role": "assistant", "content": "I will remember Kyoto."},
-            {"role": "user", "content": "Which city is my favorite?"},
-        ]
-        prepared = prepare_context(self.verifier.tokenizer, turns)
-        self.assertEqual((prepared["profile"], prepared["trimmed"]), ("quick", 1))
-        rendered = self.verifier.tokenizer.decode(prepared["tokens"])
-        self.assertIn("I will remember Kyoto", rendered)
-        self.assertIn("Which city is my favorite?", rendered)
-        self.assertNotIn("Acknowledged the old turn", rendered)
+    def test_pinned_prompt_and_generation_bounds(self):
+        phrase = "What is the capital of France?"
+        tokens = tokenize_prompt(self.model.tokenizer, phrase)
+        self.assertIn(phrase, self.model.tokenizer.decode(tokens))
+        for invalid in ("", " " * 33_000):
+            with self.assertRaises(ValueError):
+                tokenize_prompt(self.model.tokenizer, invalid)
+        with self.assertRaisesRegex(ValueError, "available context"):
+            self.model.generate(phrase, max_tokens=0)
