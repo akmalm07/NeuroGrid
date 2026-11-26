@@ -88,4 +88,17 @@ describe('ledger replay', () => {
     const purchase = seal(units, 'purchase', 'old-order', [['checkout:old-order', -500_000], ['acct:buyer', 500_000]])
     await expect(verifyChain([genesis, grant, checkout, units, purchase])).resolves.toMatchObject({ height: 4 })
   })
+
+  it('replays fractional metering, a concurrent hold, and a complete refund', async () => {
+    const units = seal(grant, 'units', 'granite-credit-subunits-v2', [])
+    const first = seal(units, 'reserve', 'first', [['acct:requester', -590], ['held:first', 590]])
+    const second = seal(first, 'reserve', 'second', [['acct:requester', -828], ['held:second', 828]])
+    const settled = seal(second, 'settle', 'first', [
+      ['held:first', -590], ['acct:requester', 403], ['acct:worker', 130],
+    ])
+    const refund = seal(settled, 'refund', 'second', [['held:second', -828], ['acct:requester', 828]])
+    await expect(verifyChain([genesis, grant, units, first, second, settled, refund])).resolves.toMatchObject({ height: 6 })
+    const duplicate = seal(refund, 'settle', 'first', settled.transfers)
+    await expect(verifyChain([genesis, grant, units, first, second, settled, refund, duplicate])).rejects.toThrow('block 7')
+  })
 })

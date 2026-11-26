@@ -2,11 +2,11 @@
 
 NeuroGrid runs **IBM Granite 4.2 8B** across four CPU worker processes. Chat uses recent completed turns as context and displays a token-counted quote before Send. The contributor package supports Windows and **Linux beta**.
 
-The Granite candidate uses trusted reference recomputation. Local and explicitly configured staging environments can run it with sandbox payments. Hardware-backed verification and production cutover remain release gates. [Release test evidence](docs/granite-beta-results.md) · [Architecture](architecture.md) · [Handoff](docs/next-feature.md)
+The local and staging Granite beta uses trusted reference recomputation and supports sandbox payments. Hosted chat remains paused pending independent verification of a complete Granite reply without a serving-path rerun. [Architecture and proof tests](architecture.md#verification-and-trust)
 
 ## Chat
 
-Sign in, enter a prompt, select **Get quote**, then confirm the maximum with **Send**. A completed Quick reply costs 2 credits. Longer Standard replies are priced by formatted input and generated tokens. Failed and empty replies release the full hold.
+Sign in, enter a prompt, select **Get quote**, then confirm the maximum with **Send**. The final charge uses the formatted conversation and the number of model positions computed. It can be fractional and a Quick reply costs up to 2 credits. Failed and empty replies release the full hold.
 
 The coordinator takes up to ten recent completed user-and-assistant pairs from the authenticated account's chat, up to 32 KiB. The pinned tokenizer drops the oldest pairs when the input exceeds its profile and preserves the latest prompt. Quick uses at most 256 formatted input and 64 generated tokens. Standard permits up to 4,096 total context and 512 generated tokens. The server lowers the output budget when necessary to fit the context or balance.
 

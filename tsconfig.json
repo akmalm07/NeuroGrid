@@ -3,6 +3,7 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
@@ -15,5 +16,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "worker.ts"]
+  "include": ["src", "worker.ts", "compute/proofs"]
 }

@@ -6,7 +6,8 @@ import { issueProbe, latencyMs, recordExecution, recordProbe, routeWorker, selec
 import type { CreditOrder } from './payments'
 import {
   CONTEXT, GRANT, LAST_SHARD, MAX_PROMPT_BYTES, MAX_TOKENS, MODEL, QUICK_INPUT, QUICK_OUTPUT, RATE, REVISION,
-  RUNTIME, SHARD_COUNT, SUPPLY, UNIT, VOCAB, WIDTH, WINDOW, blockBytes, fee, purchaseCents,
+  RUNTIME, SHARD_COUNT, SUPPLY, UNIT, VOCAB, WIDTH, WINDOW, blockBytes, inferencePositions, inferenceSubunits,
+  isInferenceRate, purchaseCents,
   type Block, type BlockData, type BlockKind, type InferenceProfile, type JobSummary, type NetworkSnapshot,
   type QuoteSummary, type Transfer,
 } from './protocol'
@@ -334,9 +335,13 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
 
   private settle(job: Job, now: number) {
     if (!job.output.trim()) return this.refund(job, 'empty_reply', now)
-    job.charge = fee(job.tokens.length, job.count)
-    const paid = job.charge * UNIT
-    if (job.rate !== RATE || paid > job.reserved) throw new Error('Invalid locked inference charge')
+    if (!isInferenceRate(job.rate)) throw new Error('Invalid locked inference rate')
+    if (job.rate === RATE && job.paidThrough !== inferencePositions(job.tokens.length, job.count)) {
+      throw new Error('Incomplete verified inference work')
+    }
+    const paid = inferenceSubunits(job.rate, job.tokens.length, job.count)
+    if (paid > job.reserved) throw new Error('Invalid locked inference charge')
+    job.charge = paid / UNIT
     job.returned = (job.reserved - paid) / UNIT
     const credits = new Map<string, number>([[job.owner, job.reserved - paid]])
     const workers = Object.entries(job.rewards)
@@ -523,15 +528,15 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
         if (duplicate) return this.summary(duplicate)
         const quote = this.read<Quote>('SELECT data FROM quotes WHERE id = ? AND owner = ? AND request_key = ?',
           quoteId, account, key)
-        if (!quote || quote.expires <= now || quote.status !== 'ready' || quote.rate !== RATE
-            || !quote.tokens || !quote.credits || !quote.maxTokens) throw new Rejection('quote_expired')
+        if (!quote || quote.expires <= now || quote.status !== 'ready' || !isInferenceRate(quote.rate)
+            || !quote.tokens?.length || !quote.maxTokens) throw new Rejection('quote_expired')
         if (this.activeJobs().length >= MAX_ACTIVE) throw new Rejection('network_busy')
         const route = selectRoute(this.queuedWorkers(this.nodes(), now), SHARD_COUNT, now, ingress)
         if (!this.verifierOnline(now) || !route) throw new Rejection('network_unavailable')
         const requests = this.one('SELECT COUNT(*) AS n FROM jobs WHERE owner = ? AND created > ?', account, now - 60_000)
         if (Number(requests?.n) >= 6) throw new Rejection('rate_limit', 429)
         this.grant(account, now)
-        const reserved = quote.credits * UNIT
+        const reserved = inferenceSubunits(quote.rate, quote.tokens.length, quote.maxTokens)
         if (this.balance(account) < reserved) throw new Rejection('insufficient_credits')
         const job: Job = {
           id: crypto.randomUUID(), owner: account, key, prompt: quote.prompt, maxTokens: quote.maxTokens, reserved,
@@ -670,7 +675,9 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
           || !tokens.every(validToken) || !isInteger(trimmed, 0, 10)) throw new Rejection('invalid_reference', 400)
       let maximum = maxTokens
       const balance = this.balance(quote.owner)
-      while (maximum && fee(tokens.length, maximum) * UNIT > balance) maximum -= 1
+      const { rate } = quote
+      if (!isInferenceRate(rate)) throw new Error('Invalid locked inference rate')
+      while (maximum && inferenceSubunits(rate, tokens.length, maximum) > balance) maximum -= 1
       if (!maximum) {
         quote.status = 'rejected'
         quote.reason = 'insufficient_credits'
@@ -679,7 +686,7 @@ export class NeuroGridCoordinator extends DurableObject<Env> {
         quote.profile = profile
         quote.tokens = tokens
         quote.maxTokens = maximum
-        quote.credits = fee(tokens.length, maximum)
+        quote.credits = inferenceSubunits(rate, tokens.length, maximum) / UNIT
         quote.trimmed = trimmed
       }
     }

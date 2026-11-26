@@ -2,13 +2,14 @@ import granite from '../../compute/neurogrid_node/granite.json'
 
 export const MODEL = 'Granite 4.2 8B'
 export const { revision: REVISION, runtime: RUNTIME, width: WIDTH, vocab: VOCAB, context: CONTEXT,
-  window: WINDOW, shards: SHARD_COUNT } = granite
+  window: WINDOW, shards: SHARD_COUNT, layersPerShard: LAYERS_PER_SHARD } = granite
 export const LAST_SHARD = SHARD_COUNT - 1
 export const MAX_PROMPT_BYTES = 16_384
 export const QUICK_INPUT = 256
 export const QUICK_OUTPUT = 64
 export const MAX_TOKENS = 512
-export const RATE = 'granite-beta-1'
+const LEGACY_RATE = 'granite-beta-1'
+export const RATE = 'granite-work-1'
 export const UNIT = 1_000
 export const SUPPLY = 100_000
 export const GRANT = 100
@@ -95,6 +96,20 @@ export interface QuoteSummary {
   trimmed?: number
 }
 
-export const fee = (input: number, generated: number) =>
-  2 + Math.ceil(Math.max(0, input - QUICK_INPUT) / QUICK_INPUT)
-    + Math.ceil(Math.max(0, generated - QUICK_OUTPUT) / 32)
+export function isInferenceRate(rate: unknown): rate is typeof RATE | typeof LEGACY_RATE {
+  return rate === RATE || rate === LEGACY_RATE
+}
+
+export const inferencePositions = (input: number, generated: number) => input + generated - 1
+
+export function inferenceSubunits(rate: typeof RATE | typeof LEGACY_RATE, input: number, generated: number) {
+  if (rate === LEGACY_RATE) {
+    return (2 + Math.ceil(Math.max(0, input - QUICK_INPUT) / QUICK_INPUT)
+      + Math.ceil(Math.max(0, generated - QUICK_OUTPUT) / 32)) * UNIT
+  }
+  // Prefill emits the first token. Each subsequent prediction evaluates one more
+  // position. Full causal attention adds 1 + 2 + ... + positions token pairs.
+  const positions = inferencePositions(input, generated)
+  const attentionPairs = positions * (positions + 1) / 2
+  return 6 * positions + Math.ceil(attentionPairs / 600)
+}

@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test'
+import type { Account } from '../src/neurogrid/api'
+import type { Block, JobSummary, NetworkSnapshot, QuoteSummary } from '../src/neurogrid/protocol'
 import { signIn, testAccounts } from './helpers/auth'
 
 const urls = [
@@ -35,18 +37,47 @@ test('ledger verifies in a fresh browser', async ({ page }) => {
 test('a signed-in browser runs a live prompt and preserves the reply after reload', async ({ page }) => {
   test.skip(process.env.NEUROGRID_TEST_INFERENCE !== '1', 'Start four Granite workers and the verifier first')
   const [account] = testAccounts()
-  test.setTimeout(300_000)
+  test.setTimeout(27 * 60_000)
   await page.goto('/chat')
   await signIn(page, account)
   await expect(page.getByLabel('Maximum tokens')).toHaveCount(0)
+  const network = await page.request.get('/api/grid/public/network')
+  const { height } = await network.json() as NetworkSnapshot
   const prompt = 'What is the capital of France? Reply with the city only. Reference ' + Date.now()
   await page.getByRole('textbox', { name: 'Message' }).fill(prompt)
+  const quoted = page.waitForResponse(async (response) => response.url().endsWith('/api/grid/user/quote')
+    && response.ok() && (await response.json() as QuoteSummary).status === 'ready')
   await page.getByRole('button', { name: 'Get quote' }).click()
-  await expect(page.getByRole('status').filter({ hasText: 'Up to 2 credits' })).toBeVisible({ timeout: 32_000 })
+  const quote = await (await quoted).json() as QuoteSummary
+  const maximum = quote.credits!
+  expect(maximum).toBeGreaterThan(0)
+  await expect(page.getByRole('status').filter({ hasText: `Up to ${maximum} credits` })).toBeVisible()
+  const proposed = page.waitForRequest((request) => request.url().endsWith('/api/grid/user/request'))
   await page.getByRole('button', { name: 'Send prompt' }).click()
+  const submitted = await proposed
+  const initial = await submitted.response()
+  expect(initial?.ok()).toBe(true)
+  const { id } = await initial!.json() as JobSummary
   const turn = page.locator('.chat-turn').filter({ hasText: prompt }).last()
-  await expect(turn).toContainText('2 credits', { timeout: 240_000 })
-  await expect(turn).toContainText('Paris')
+  await expect(turn).toContainText('Paris', { timeout: 25 * 60_000 })
+  const session = await page.request.post('/api/auth/token', { data: {}, headers: { Origin: new URL(page.url()).origin } })
+  expect(session.ok()).toBe(true)
+  const { token } = await session.json() as { token: string }
+  const headers = { Authorization: `Bearer ${token}` }
+  const accountView = await page.request.get('/api/grid/user/account', { headers })
+  expect(accountView.ok()).toBe(true)
+  const settled = (await accountView.json() as Account).jobs.find((job) => job.id === id)!
+  expect(settled.status).toBe('settled')
+  expect(settled.charge).toBeGreaterThan(0)
+  expect(settled.charge).toBeLessThan(maximum)
+  expect(settled.charge + settled.returned!).toBeCloseTo(maximum, 3)
+  await expect(turn).toContainText(`${settled.charge} credits`)
+  const replay = await page.request.post('/api/grid/user/request', { data: submitted.postDataJSON(), headers })
+  expect(replay.ok()).toBe(true)
+  expect(await replay.json()).toMatchObject({ id, status: 'settled', charge: settled.charge })
+  const ledger = await page.request.get(`/api/grid/public/ledger?after=${height}`)
+  const blocks = (await ledger.json() as { blocks: Block[] }).blocks.filter((block) => block.reference === id)
+  expect(blocks.map((block) => block.kind)).toEqual(['reserve', 'settle'])
   const completed = await page.locator('.chat-turn').filter({ hasText: prompt }).last().textContent()
   await page.reload()
   await expect(page.locator('.chat-turn').filter({ hasText: prompt }).last()).toHaveText(completed ?? '')

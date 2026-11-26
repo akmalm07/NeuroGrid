@@ -18,6 +18,7 @@ from . import REVISION, RUNTIME, SHARD_COUNT
 from .profile import MAX_THREADS, ProfileStore, WorkerStatus, site_origin
 
 USER_AGENT = "NeuroGrid-Node/0.1"
+DEFAULT_IDLE_POLL = 2
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -60,6 +61,7 @@ class GridClient:
 def run_node(
     client: GridClient, stop: Event, threads: int = 2, duty: int = 100, model_path: Path | None = None,
     report: Callable[[str], None] = print, *, observe: Callable[[WorkerStatus], None] | None = None,
+    idle_poll: int = DEFAULT_IDLE_POLL,
 ) -> None:
     status = WorkerStatus(threads=threads, duty=duty)
     while not stop.is_set():
@@ -124,7 +126,7 @@ def run_node(
                         client.call("ping", {"probe": probe}, timeout=2)
                     except (GridError, OSError, ValueError):
                         pass  # An optional latency sample must not interrupt work polls.
-                stop.wait(0.15 if response.get("active") else 2)
+                stop.wait(0.15 if response.get("active") else idle_poll)
         except GridError as exc:
             if exc.status in (401, 403) or str(exc) == "model_mismatch":
                 raise
@@ -146,7 +148,7 @@ def run_node(
 
 def run_configured_node(
     client: GridClient, stop: Event, store: ProfileStore, threads: int, duty: int,
-    model_path: Path | None = None, report: Callable[[str], None] = print,
+    model_path: Path | None = None, report: Callable[[str], None] = print, *, idle_poll: int = DEFAULT_IDLE_POLL,
 ) -> None:
     """Run the same inference loop with a local, redacted runtime snapshot."""
     current = WorkerStatus(threads=threads, duty=duty)
@@ -163,7 +165,7 @@ def run_configured_node(
             current = status
 
     try:
-        run_node(client, stop, threads, duty, model_path, report, observe=observe)
+        run_node(client, stop, threads, duty, model_path, report, observe=observe, idle_poll=idle_poll)
     except GridError as exc:
         observe(replace(current, state="reenrollment_required" if exc.status in (401, 403) else "failed"))
         raise
@@ -211,6 +213,8 @@ def main() -> None:
         run.add_argument("--duty", type=int, choices=range(1, 101), metavar="PERCENT")
         if role == "node":
             run.add_argument("--profile", type=Path, help="Use this saved contributor profile")
+            run.add_argument("--idle-poll", type=int, default=DEFAULT_IDLE_POLL, metavar="SECONDS",
+                             help="Worker claim interval while the network is idle (2–30 seconds)")
     config = commands.add_parser("config", help="Read or update saved contributor settings")
     config.add_argument("--profile", type=Path)
     status = commands.add_parser("status", help="Read saved settings and the local worker's status")
@@ -225,6 +229,9 @@ def main() -> None:
     pause.add_argument("--pause", dest="paused", action="store_true", default=None)
     pause.add_argument("--resume", dest="paused", action="store_false")
     args = parser.parse_args()
+    if args.role == "node" and not DEFAULT_IDLE_POLL <= args.idle_poll <= 30:
+        run = commands.choices["node"]
+        run.error("--idle-poll must be between 2 and 30 seconds")
     if args.role in {"config", "status"}:
         store = ProfileStore(args.profile)
         try:
@@ -275,9 +282,11 @@ def main() -> None:
             if args.role == "reference":
                 run_verifier(client, stop, threads=threads, model_path=args.model, report=report)
             elif store:
-                run_configured_node(client, stop, store, threads, duty, model_path=args.model, report=report)
+                run_configured_node(client, stop, store, threads, duty, model_path=args.model, report=report,
+                                    idle_poll=args.idle_poll)
             else:
-                run_node(client, stop, threads=threads, duty=duty, model_path=args.model, report=report)
+                run_node(client, stop, threads=threads, duty=duty, model_path=args.model, report=report,
+                         idle_poll=args.idle_poll)
     except (GridError, OSError, RuntimeError, ValueError) as exc:
         parser.exit(1, f"NeuroGrid: {exc}\n")
 

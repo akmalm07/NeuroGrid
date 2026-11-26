@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from neurogrid_node import SHARD_COUNT
 
-from live_check import auth, call, wait_until
+from live_check import auth, call, subunits, wait_until
 
 
 def main():
@@ -50,7 +50,9 @@ def main():
         quote = wait_until(draft, "Standard quote")
         assert quote["profile"] == "standard"
         quotes.append(({"key": key, "quoteId": quote["id"]}, quote["credits"]))
-    assert sum(quote[1] for quote in quotes) > before, "The test fixture balance must fit fewer than four holds"
+    assert sum(subunits(quote[1]) for quote in quotes) > subunits(before), (
+        "The test fixture balance must fit fewer than four holds"
+    )
 
     def submit(item):
         packet, cost = item
@@ -64,7 +66,7 @@ def main():
         accepted = {job["id"]: cost for status, job, cost in results if status == 200}
         denied = [job["error"] for status, job, _cost in results if status != 200]
         assert len(accepted) >= 2 and denied and set(denied) == {"insufficient_credits"}, (len(accepted), denied)
-        assert account(requester)["credits"] == before - sum(accepted.values())
+        assert subunits(account(requester)["credits"]) == subunits(before) - sum(map(subunits, accepted.values()))
         print(f"PASS {len(accepted)} concurrent holds, {len(denied)} overspend denied", flush=True)
     finally:
         for node_id in online:

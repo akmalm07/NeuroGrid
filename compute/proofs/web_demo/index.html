@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>NeuroGrid · Inference proof</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="brand">NeuroGrid</p>
+      <h1>Inference proof</h1>
+      <p>A small transformer generates two tokens from your prompt. Your browser checks every proof segment using public verification artifacts.</p>
+    </header>
+    <form id="prompt">
+      <fieldset>
+        <legend>Prompt tokens</legend>
+        <div class="tokens">
+          <label>First token <select id="first"><option>0</option><option>1</option><option>2</option><option>3</option></select></label>
+          <label>Second token <select id="second"><option>0</option><option selected>1</option><option>2</option><option>3</option></select></label>
+        </div>
+      </fieldset>
+      <button type="submit">Generate and verify</button>
+    </form>
+    <section aria-labelledby="result-title">
+      <h2 id="result-title">Verification</h2>
+      <p id="status" role="status">Choose two token IDs to start.</p>
+      <div id="result" hidden>
+        <dl>
+          <div><dt>Response tokens</dt><dd id="reply"></dd></div>
+          <div><dt>Verified segments</dt><dd id="segments"></dd></div>
+          <div><dt>Verification time</dt><dd id="seconds"></dd></div>
+          <div><dt>Model manifest SHA-256</dt><dd id="manifest"></dd></div>
+        </dl>
+        <a id="download">Download verification bundle</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

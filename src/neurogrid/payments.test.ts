@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import type { Env } from '../../worker'
 import { startCheckout, stripeOutcome, stripeSettings, verifyStripeSignature } from './payments'
-import { fee, purchaseCents } from './protocol'
+import { CONTEXT, MAX_TOKENS, QUICK_INPUT, QUICK_OUTPUT, RATE, UNIT, inferenceSubunits, purchaseCents } from './protocol'
 
 const id = '1e27e7d5-659d-4c6b-9f6e-c6c61f657bc0'
 
@@ -25,10 +25,23 @@ it('enables live checkout only on its configured HTTPS origin', () => {
   }, local)?.live).toBe(false)
 })
 
-it('prices the pinned Quick and Standard profiles in credits', () => {
-  expect(fee(256, 64)).toBe(2)
-  expect(fee(300, 80)).toBe(4)
-  expect(fee(256, 65)).toBe(3)
+it('meters prefill, decode positions, and causal attention in integer credit subunits', () => {
+  expect(inferenceSubunits(RATE, 1, 1)).toBe(7)
+  expect(inferenceSubunits(RATE, 30, 1)).toBe(181)
+  expect(inferenceSubunits(RATE, 30, 2)).toBe(187)
+  expect(inferenceSubunits(RATE, 60, 2)).toBe(370)
+  expect(inferenceSubunits(RATE, QUICK_INPUT, QUICK_OUTPUT)).toBe(2 * UNIT)
+  expect(inferenceSubunits(RATE, 300, 80)).toBe(2_395)
+  const input = CONTEXT - MAX_TOKENS
+  const maximum = inferenceSubunits(RATE, input, MAX_TOKENS)
+  expect(maximum).toBe(38_548)
+  expect(inferenceSubunits(RATE, input, MAX_TOKENS - 1)).toBeLessThan(maximum)
+})
+
+it('preserves previously locked whole-credit rates', () => {
+  expect(inferenceSubunits('granite-beta-1', 256, 64)).toBe(2 * UNIT)
+  expect(inferenceSubunits('granite-beta-1', 300, 80)).toBe(4 * UNIT)
+  expect(inferenceSubunits('granite-beta-1', 256, 65)).toBe(3 * UNIT)
 })
 
 it('prices whole-credit orders at one cent per credit, with a one-dollar minimum', () => {

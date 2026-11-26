@@ -1,7 +1,7 @@
 import { Activity, ArrowRight, BadgeCheck, CircuitBoard, Coins, Cpu, Layers3 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useNetwork } from '../neurogrid/live'
-import { MODEL } from '../neurogrid/protocol'
+import { LAYERS_PER_SHARD, MODEL, QUICK_INPUT, QUICK_OUTPUT, RATE, SHARD_COUNT, UNIT, inferenceSubunits } from '../neurogrid/protocol'
 import { Coverage, networkReady, Shell, StartLinks } from '../neurogrid/ui'
 
 const process = [
@@ -9,6 +9,7 @@ const process = [
   { icon: Layers3, title: 'Generate together', text: 'Each shard passes its output to the next. The coordinator repeats the sequence for every new token.' },
   { icon: BadgeCheck, title: 'Get credit for work', text: 'A trusted reference checks every result. Successful requests pay contributors from the inference fee.' },
 ]
+const quickMaximum = inferenceSubunits(RATE, QUICK_INPUT, QUICK_OUTPUT) / UNIT
 
 export default function Home() {
   const { result, failed } = useNetwork()
@@ -30,9 +31,9 @@ export default function Home() {
             {failed ? 'Status unavailable' : !result ? 'Checking network' : networkReady(result) ? 'Network ready' : 'Waiting for capacity'}
           </Link>
         </div></div>
-        <div><Layers3 size={20} /><div><strong>30</strong><span>Transformer layers</span></div></div>
+        <div><Layers3 size={20} /><div><strong>{SHARD_COUNT * LAYERS_PER_SHARD}</strong><span>Transformer layers</span></div></div>
         <div><Activity size={20} /><div><strong>{result?.settled ?? '—'}</strong><span>Verified requests</span></div></div>
-        <div><Coins size={20} /><div><strong>2 credits</strong><span>Quick reply</span></div></div>
+        <div><Coins size={20} /><div><strong>Up to {quickMaximum} credits</strong><span>Quick reply</span></div></div>
       </div>
     </section>
     <section className="grid-container home-section">

@@ -17,6 +17,10 @@ from neurogrid_node.client import GridClient, GridError
 from neurogrid_node.profile import ProfileStore
 
 
+def subunits(credits):
+    return round(credits * 1000)
+
+
 def call(base, path, *, data=None, token=None, cookie=None):
     body = None if data is None else json.dumps(data).encode()
     headers = {"Origin": base, "Content-Type": "application/json", "User-Agent": "NeuroGrid-Live-Check/0.1"}
@@ -73,7 +77,9 @@ def main():
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--failover", action="store_true")
-    parser.add_argument("--context-only", action="store_true", help="Check a follow-up after the saved Kyoto turn")
+    turns = parser.add_mutually_exclusive_group()
+    turns.add_argument("--context-only", action="store_true", help="Check a follow-up after the saved Kyoto turn")
+    turns.add_argument("--france-only", action="store_true", help="Check only the first France turn")
     parser.add_argument("--extended", action="store_true", help="Also test longer output and additional chat turns")
     parser.add_argument("--keep-online", action="store_true")
     args = parser.parse_args()
@@ -144,15 +150,15 @@ def main():
 
         job = wait_until(terminal, "Granite reply", timeout=540)
         assert job["status"] == "settled", job
-        if price == 2:
-            assert job["charge"] == 2, job
+        charged = subunits(job["charge"])
+        assert 0 < charged <= subunits(price), job
         if expected:
             assert expected.lower() in job["output"].lower(), job
-        assert job["charge"] + job["returned"] == price
-        assert account(requester)["credits"] == original - job["charge"]
+        assert charged + subunits(job["returned"]) == subunits(price)
+        assert subunits(account(requester)["credits"]) == subunits(original) - charged
         duplicate_status, duplicate, _ = call(origin, "/api/grid/user/request", token=requester, data=packet)
         assert duplicate_status == 200 and duplicate["id"] == job_id
-        assert account(requester)["credits"] == original - job["charge"]
+        assert subunits(account(requester)["credits"]) == subunits(original) - charged
         blocks = call(origin, "/api/grid/public/ledger")[1]["blocks"]
         if len(blocks) < 100:
             assert sum(block["reference"] == job_id and block["kind"] == "settle" for block in blocks) == 1
@@ -184,14 +190,18 @@ def main():
                 workers[0] = (backup, standby, standby_store)
                 GridClient(origin, first["secret"]).call("pause", {})
             france = finish(job, packet, before, price, expected="Paris")
-            print(f"PASS real Granite France answer {france['output']!r}, 2 credits once "
+            assert 0 < france["charge"] < price and subunits(france["charge"]) % 1000 != 0, france
+            print(f"PASS real Granite France answer {france['output']!r}, {france['charge']} credits once "
+                  f"of {price} quoted, {france['count']} generated tokens "
                   f"({time.monotonic() - start_time:.1f}s)", flush=True)
+            if args.france_only:
+                return
 
             before = account(requester)["credits"]
             job, packet, price = start("What is the capital of Paris?")
             paris = finish(job, packet, before, price, expected="France")
             assert "city" in paris["output"].lower(), paris
-            print(f"PASS real Granite Paris clarification {paris['output']!r}, 2 credits once", flush=True)
+            print(f"PASS real Granite Paris clarification {paris['output']!r}, {paris['charge']} credits once", flush=True)
 
             before = account(requester)["credits"]
             job, packet, price = start("Remember that my chosen city is Kyoto. Confirm in one sentence.")

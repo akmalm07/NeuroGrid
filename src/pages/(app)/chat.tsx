@@ -189,7 +189,7 @@ export default function Chat() {
             : <button className="text-link" type="button" onClick={() => showSignIn(true)}>Sign in to view your balance</button>}
           {isSignedIn && accountError && <p className="form-error" role="status">{accountError}</p>}
           {!isSignedIn && <p>New accounts start with {GRANT} free credits while starter credits are available.</p>}
-          <p>Quick replies cost 2 credits. Unused credits come back to your balance.</p>
+          <p>Your charge depends on the conversation processed and the tokens generated. Unused credits come back to your balance.</p>
           {checkoutMode !== 'disabled' && <form className="credit-checkout" aria-labelledby="checkout-title" onSubmit={buyCredits}>
             <h3 id="checkout-title">Buy compute credits</h3>
             {checkoutMode === 'test' && <p>Stripe test mode</p>}
